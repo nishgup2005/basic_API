@@ -18,10 +18,6 @@ class UserBase(BaseModel):
     email: str
     password: str
     phone_no: str
-    salary: int = 0
-    credited_out: datetime = datetime.now()
-    credited_by: str = "admin"
-    is_partial: bool = False
 
 
 #custom class to validate salary information 
