@@ -51,7 +51,6 @@ async def get_user(db: db_dependency):
     results = (
         db.query(model.Users).all()
     )
-    print(results)
 
     if not results:
         return JSONResponse(content={"status_code": 404,
@@ -155,27 +154,35 @@ async def create_User(user: UserBase, db: db_dependency):
 
 @app.post("/salary", status_code=400)
 async def addSalary(userSalary: SalaryBase, db: db_dependency):
-    try:
-        db_salary = model.Salary(salary=userSalary.salary,
-                                credited_out=userSalary.credited_out,
-                                credited_by=userSalary.credited_by,
-                                is_partial=userSalary.is_partial,
-                                user_id=userSalary.user_id)
-        db.add(db_salary)
-        db.commit()
-        db.refresh(db_salary)
-
-        return JSONResponse(content={"status_code": 201,
-                                     "salary": {"salary_ID": db_salary.id,
-                                                "salary": db_salary.salary,
-                                                "user_id": db_salary.user_id},
-                                     "msg": f"Salary for user {db_salary.user_id} has been added successfully."
-    })
-
-    except Exception as e:
+    user=db.get(model.Users,userSalary.user_id)
+    if not user:
         return JSONResponse(content={"status_code": 404,
                                      "msg": "User Not Found"},
-                                     status_code=404)
+
+                            status_code=404)
+    
+    if user.salary:
+            return JSONResponse(content={"status_code": 422,
+                                         "msg": "Unprocessable Entity",
+                                         "detail":"Salary for this user exists"},
+
+                                status_code=422)
+
+    db_salary = model.Salary(salary=userSalary.salary,
+                            credited_out=userSalary.credited_out,
+                            credited_by=userSalary.credited_by,
+                            is_partial=userSalary.is_partial,
+                            user_id=userSalary.user_id)
+    db.add(db_salary)
+    db.commit()
+    db.refresh(db_salary)
+
+    return JSONResponse(content={"status_code": 201,
+                                    "salary": {"salary_ID": db_salary.id,
+                                            "salary": db_salary.salary,
+                                            "user_id": db_salary.user_id},
+                                    "msg": f"Salary for user {db_salary.user_id} has been added successfully."
+    })
 
     
 
@@ -212,6 +219,18 @@ def update_user(input: InputBase, db: db_dependency):
     user_id = input.user_id
     field = input.field
     value = input.value
+    
+    if field == "id":
+        return JSONResponse(content={"status_code": 403,
+                                     "msg": "Forbidden",
+                                     "detail": "Changing the ID for user is Forbidden"},
+                                     status_code=403)
+
+    if not isinstance(value,str):
+        return JSONResponse(content={"status_code": 422,
+                                     "msg": "Unprocessable Entity",
+                                     "detail": "Invalid Input Format for chosen field"},
+                                     status_code=422)
 
     user = db.get(model.Users, user_id)
     if not user:
@@ -247,7 +266,29 @@ def update_salary(input:InputBase, db: db_dependency):
     user_id = input.user_id
     field = input.field
     value = input.value
+    invalid_input=False
+
+    # if field == "id":
+    #     return JSONResponse(content={"status_code": 403,
+    #                                  "msg": "Forbidden",
+    #                                  "detail": "Changing the ID for salary is Forbidden"},
+    #                                  status_code=403)
     
+    if field not in ["salary","user_id"] and not isinstance(value,int):
+        invalid_input=True
+    elif field == "credited_by" and not isinstance(value,str):
+        invalid_input=True
+    elif field == "credited_out"and not isinstance(value,datetime.isoformat(value)):
+        invalid_input=True
+    elif field == "is_partial" and not isinstance(value,bool):
+        invalid_input=True
+
+    if invalid_input:
+        return JSONResponse(content={"status_code": 422,
+                                     "msg": "Unprocessable Entity.",
+                                     "detail": "Invalid Input Format for chosen Field"},
+                                     status_code=422)
+
     user = db.get(model.Users, user_id)
     if not user:
         return JSONResponse(content={"status_code": 404,
