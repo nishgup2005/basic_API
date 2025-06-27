@@ -22,5 +22,5 @@ class Salary(Base):
     credited_out = Column(DateTime, nullable=False)
     credited_by = Column(String, nullable=False)
     is_partial = Column(Boolean, nullable=False, default=False)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, unique=True, onupdate="CASCADE")
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, unique=True)
     user = relationship("Users", back_populates="salary")
