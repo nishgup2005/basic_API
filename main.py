@@ -1,8 +1,7 @@
 from typing import Annotated
-from fastapi import FastAPI, HTTPException, Depends, Request, Response
-from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse, PlainTextResponse
-from pydantic import BaseModel, EmailStr, ValidationError, field_validator, Field
+from fastapi import FastAPI, Depends, Request, Response
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, EmailStr, field_validator, Field
 import model
 from database import engine, get_db
 from sqlalchemy.orm import session
@@ -10,14 +9,44 @@ from datetime import datetime, timedelta
 from passlib.context import CryptContext
 from secrets import token_hex
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
-from jose import jwt, JWTError
+from jose import jwt
+from redis import Redis
+from contextlib import asynccontextmanager
 
-app = FastAPI()
+# asynccontextmanager is a event handler that can be used to
+# define functionality before the application is started 
+# and after the application has ended
+# code before yield statement is executed before the app starts
+# code after the yield statement is executed after the app ends
+
+@asynccontextmanager
+async def lifespan(app:FastAPI):
+    app.state.redis = Redis(host='localhost', port=6379)
+    yield
+    app.state.redis.close()
+
+# the lifespan function defined above is passed in the lifetime 
+# parameter of the app 
+
+app = FastAPI(lifespan=lifespan)
 model.Base.metadata.create_all(bind=engine)
+
+# secret key is used hash the data
+# the token hex function from secrets module takes an input n 
+# and returns random 32 byte string which can be used as a secret key
+
 secret_key = token_hex(32)
 hash = 'HS256'
+
+# time_to_live is the time defined after which a token will expire
 time_to_live = 30
+
+# bcrypt context is used for encryption
 bcrypt_context = CryptContext(schemes=['bcrypt'], deprecated='auto')
+
+# oauth2 is security framework.
+# OAuth2PasswordBearer is a security measure provided by the 
+# fastAPI framework to enbale secure authentication procedures ('flows') 
 oauth2_bearer = OAuth2PasswordBearer(tokenUrl='token')
 
 #custom class to validate user information
@@ -39,18 +68,42 @@ class SalaryBase(BaseModel):
     is_partial: bool = False
     user_id: int
 
-
+# custom class to validate input for updation
 class InputBase(BaseModel):
     user_id: int
     field: str
     value: str | int | bool | datetime
 
 
+# custom class to validate input for login
 class LoginBase(BaseModel):
     email: EmailStr
-    password: str
+    password: str = Field(min_length=10)
+
+    @field_validator('password', mode='after')
+    @classmethod
+    def validate_password(cls, value:str):
+        uprcnt=0
+        lwrcnt=0
+        spclcnt=0
+        for i in value:
+            if i.isupper():
+                uprcnt+=1
+            if i.islower():
+                lwrcnt+=1
+            if not i.isalnum():
+                spclcnt+=1
+        if not(uprcnt >= 1):
+            raise ValueError("password must have atleast 1 uppercase letter")
+        if not(lwrcnt >= 1):
+            raise ValueError("password must have atleast 1 lowercase letter")
+        if not(spclcnt >= 1):
+            raise ValueError("password must have atleast 1 special character")
+        
+        return value
 
 
+# custom class to validate input for registration 
 class RegisterBase(BaseModel):
     name: str
     email: EmailStr
@@ -80,6 +133,7 @@ class RegisterBase(BaseModel):
         
         return value
     
+# custom class to access a token
 class Token(BaseModel):
     access_token: str
     token_type: str
@@ -128,14 +182,23 @@ async def get_user(db: db_dependency):
 # GET:/user returns the User whos id matches with the input user_id
 # It takes the user_id as a path parameter
 
-@app.get("/user/{user_id}", status_code=200)
-async def get_user_id(user_id: int, db: db_dependency):
-        
+@app.get("/user", status_code=200)
+async def get_user_id(request:Request, db: db_dependency):
+
+    header = dict(request.headers)
+    token = header['x-token']
+    if not app.state.redis.exists(token):
+        return JSONResponse(content={"status_code":401,
+                                     "msg":"Unauthorized",
+                                     "detail":"Your session has logged out. Log in again"},
+                            status_code=401)
+    user_id = app.state.redis.get(token).decode('UTF-8')
+    print(user_id)
     result = (db
             .query(model.Users)
             .filter(model.Users.id==user_id).one_or_none()
             )
-    
+
     if not result:
         return JSONResponse(content={"status_code": 404,
                                      "msg": "User Not Found"},
@@ -166,9 +229,6 @@ async def get_user_id(user_id: int, db: db_dependency):
                             
                             status_code=200)
 
-# POST:/user is used to insert user data into the database
-# After inserting user data it is important to call POST:/salary
-# as well for the inserted user-id
 
 # @app.post('/login',status_code=200)
 # async def user_login(user: LoginBase, db: db_dependency):
@@ -222,7 +282,6 @@ async def user_register(user:RegisterBase, db:db_dependency):
 
 @app.post('/login',response_model=Token)
 async def token_login(form_data:Annotated[OAuth2PasswordRequestForm,Depends()],db:db_dependency):
-    print(form_data.username, form_data.password,sep=" | ")
     user = authenticateUser(form_data.username, form_data.password, db)
 
     if not user:
@@ -232,9 +291,11 @@ async def token_login(form_data:Annotated[OAuth2PasswordRequestForm,Depends()],d
                             status_code=401)
     
     token = create_user_token(user.email, user.id, timedelta(minutes=time_to_live))
+    if app.state.redis.setex(token, time_to_live, user.id):
+        print("token inserted")
     return JSONResponse(content={"status_code":200,
                                  "msg":"Login Successful"},
-                        headers={"token":token},
+                        headers={"x-token":token},
                         status_code=200)
 
 
@@ -254,8 +315,11 @@ def create_user_token(email:str, user_id:int, ttl:timedelta):
     encode={"sub":email, "id":user_id}
     expires = datetime.now()+ttl
     encode.update({"exp":expires})
-    print(jwt.encode(encode, secret_key, algorithm=hash))
     return jwt.encode(encode, secret_key, algorithm=hash)
+
+# POST:/user is used to insert user data into the database
+# After inserting user data it is important to call POST:/salary
+# as well for the inserted user-id
 
 
 @app.post('/user', status_code=201)
@@ -454,3 +518,8 @@ def update_salary(input:InputBase, db: db_dependency):
                                      "msg": "Unprocessable Entity.",
                                      "detail": "Field for Salary does not exist"},
                                      status_code=422)
+
+
+# @app.get('/test')
+# async def test_method(request:Request, db: db_dependency):
+    
