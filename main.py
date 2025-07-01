@@ -142,40 +142,10 @@ class RegisterBase(BaseModel):
         
         return value
 
-
 # custom class to access a token
 class Token(BaseModel):
     access_token: str
     token_type: str
-
-
-class PassBase(BaseModel):
-    username: str
-    old_pass: str = Field(min_length=10)
-    new_pass: str = Field(min_length=10)
-
-    @field_validator('old_pass','new_pass', mode='after')
-    @classmethod
-    def validate_password(cls, value:str):
-        uprcnt=0
-        lwrcnt=0
-        spclcnt=0
-        for i in value:
-            if i.isupper():
-                uprcnt+=1
-            if i.islower():
-                lwrcnt+=1
-            if not i.isalnum():
-                spclcnt+=1
-        if not(uprcnt >= 1):
-            raise ValueError("password must have atleast 1 uppercase letter")
-        if not(lwrcnt >= 1):
-            raise ValueError("password must have atleast 1 lowercase letter")
-        if not(spclcnt >= 1):
-            raise ValueError("password must have atleast 1 special character")
-        
-        return value
-
 
 db_dependency = Annotated[session, Depends(get_db)]
 
@@ -218,6 +188,13 @@ async def get_user(db: db_dependency):
 async def get_user_id(request:Request, db: db_dependency):
 
     header = dict(request.headers)
+
+    if not header["x-token"]:
+        return JSONResponse(content={"status_code":422,
+                                     "msg":"Unprocessable Entity",
+                                     "detail":"Invalid Token"},
+                            status_code=422)
+
     token = header['x-token']
 
     if not app.state.redis.exists(token):
@@ -336,6 +313,13 @@ def create_user_token(email:str, user_id:int, ttl:timedelta):
 async def create_User(user: UserBase, db: db_dependency, request:Request):
 
     header = dict(request.headers)
+
+    if not header["x-token"]:
+        return JSONResponse(content={"status_code":422,
+                                     "msg":"Unprocessable Entity",
+                                     "detail":"Invalid Token"},
+                            status_code=422)
+
     token = header['x-token']
 
     # checks for token validity
@@ -375,7 +359,7 @@ async def create_User(user: UserBase, db: db_dependency, request:Request):
                                     "user_id": db_user.id,
                                     "msg": f"user {db_user.name} "
                                     "has been added successfully."},
-                                    status_code=201)
+                            status_code=201)
     else:
         return JSONResponse(content={"status_code":401,
                                      "msg":"Unauthorized",
@@ -390,6 +374,13 @@ async def create_User(user: UserBase, db: db_dependency, request:Request):
 async def addSalary(request:Request, userSalary: SalaryBase, db: db_dependency):
 
     header = dict(request.headers)
+
+    if not header["x-token"]:
+        return JSONResponse(content={"status_code":422,
+                                     "msg":"Unprocessable Entity",
+                                     "detail":"Invalid Token"},
+                            status_code=422)
+
     token = header['x-token']
 
     # checks for token validity
@@ -456,6 +447,13 @@ async def addSalary(request:Request, userSalary: SalaryBase, db: db_dependency):
 def delete_user(input: DeleteBase, db: db_dependency, request: Request):
     
     header = dict(request.headers)
+
+    if not header["x-token"]:
+        return JSONResponse(content={"status_code":422,
+                                     "msg":"Unprocessable Entity",
+                                     "detail":"Invalid Token"},
+                            status_code=422)
+
     token = header['x-token']
 
     # checks for token validity
@@ -498,6 +496,13 @@ def delete_user(input: DeleteBase, db: db_dependency, request: Request):
 def update_user(input: UserUpdateBase, db: db_dependency, request:Request):
 
     header = dict(request.headers)
+
+    if not header["x-token"]:
+        return JSONResponse(content={"status_code":422,
+                                     "msg":"Unprocessable Entity",
+                                     "detail":"Invalid Token"},
+                            status_code=422)
+    
     token = header['x-token']
 
     # checks for token validity
@@ -512,7 +517,7 @@ def update_user(input: UserUpdateBase, db: db_dependency, request:Request):
     if not user:
         return JSONResponse(content={"status_code": 404,
                                      "msg": "User Not Found"},
-                                     status_code=404)
+                            status_code=404)
     field = input.field
     value = input.value
     
@@ -520,7 +525,7 @@ def update_user(input: UserUpdateBase, db: db_dependency, request:Request):
         return JSONResponse(content={"status_code": 403,
                                      "msg": "Forbidden",
                                      "detail": "Changing the ID for user is Forbidden"},
-                                     status_code=403)
+                            status_code=403)
     if field == "password":
         value = bcrypt_context.hash(value)
 
@@ -528,7 +533,7 @@ def update_user(input: UserUpdateBase, db: db_dependency, request:Request):
         return JSONResponse(content={"status_code": 422,
                                      "msg": "Unprocessable Entity",
                                      "detail": "Invalid Input Format for chosen field"},
-                                     status_code=422)
+                            status_code=422)
 
 
     
@@ -548,7 +553,7 @@ def update_user(input: UserUpdateBase, db: db_dependency, request:Request):
         return JSONResponse(content={"status_code": 422,
                                      "msg": "Unprocessable Entity",
                                      "detail": "Field for User does not exist"},
-                                     status_code=422)
+                            status_code=422)
 
 # /updateSalary is used to update the value of input field
 # inside the Salary table
@@ -558,6 +563,13 @@ def update_user(input: UserUpdateBase, db: db_dependency, request:Request):
 def update_salary(input:SalaryUpdateBase, db: db_dependency, request: Request):
 
     header = dict(request.headers)
+
+    if not header["x-token"]:
+        return JSONResponse(content={"status_code":422,
+                                     "msg":"Unprocessable Entity",
+                                     "detail":"Invalid Token"},
+                            status_code=422)
+
     token = header['x-token']
 
     # checks for token validity
@@ -591,18 +603,18 @@ def update_salary(input:SalaryUpdateBase, db: db_dependency, request: Request):
             return JSONResponse(content={"status_code": 422,
                                         "msg": "Unprocessable Entity.",
                                         "detail": "Invalid Input Format for chosen Field"},
-                                        status_code=422)
+                                status_code=422)
 
         user = db.get(model.Users, user_id)
         if not user:
             return JSONResponse(content={"status_code": 404,
                                         "msg": "User Not Found"},
-                                        status_code=404)
+                                status_code=404)
         if not user.salary:
             return JSONResponse(content={"status_code": 422,
                                         "msg": "Unprocessable Entity.",
                                         "detail": "Salary for User does not exist"},
-                                        status_code=422)
+                                status_code=422)
         
         salary = user.salary[0]
 
@@ -610,22 +622,21 @@ def update_salary(input:SalaryUpdateBase, db: db_dependency, request: Request):
             before = getattr(salary, field)
             setattr(salary, field, value)
             db.commit()
-            return {
-                "status_code":200,
-                "before": before,
-                "after": getattr(salary, field),
-                "user_id":user.id,
-                "msg": f"Attribute {field} was updated with value {value} for salary with user_id {user_id} successfully"
-            }
+            return JSONResponse(content={"status_code":200,
+                                         "before": before,
+                                         "after": getattr(salary, field),
+                                         "user_id":user.id,
+                                         "msg": f"Attribute {field} was updated with value {value} for salary with user_id {user_id} successfully"},
+                                status_code=200)
         else:
             return JSONResponse(content={"status_code": 422,
                                         "msg": "Unprocessable Entity.",
                                         "detail": "Field for Salary does not exist"},
-                                        status_code=422)
+                                status_code=422)
 
     else:
         return JSONResponse(content={"status_code":401,
                                      "msg":"Unauthorized",
                                      "detail":"User is not authorized to create salary"},
                             status_code=401)
-
+    
