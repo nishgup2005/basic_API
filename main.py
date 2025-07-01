@@ -56,7 +56,6 @@ class UserBase(BaseModel):
     email: EmailStr
     password: str
     phone_no: str
-    role : str = "user"
 
 
 #custom class to validate salary information 
@@ -118,7 +117,6 @@ class RegisterBase(BaseModel):
     email: EmailStr
     password: str = Field(min_length=10)
     phone_no: str = ""
-    role : str = "user"
 
     @field_validator('password', mode='after')
     @classmethod
@@ -189,7 +187,7 @@ async def get_user_id(request:Request, db: db_dependency):
 
     header = dict(request.headers)
 
-    if not header["x-token"]:
+    if not "x-token" in header:
         return JSONResponse(content={"status_code":422,
                                      "msg":"Unprocessable Entity",
                                      "detail":"Invalid Token"},
@@ -243,7 +241,7 @@ async def user_register(user:RegisterBase, db:db_dependency):
                             email=user.email,
                             password=bcrypt_context.hash(user.password),
                             phone_no=user.phone_no,
-                            role=user.role)
+                            role="user")
 
         db.add(db_user)
         db.commit()
@@ -279,7 +277,7 @@ async def token_login(form_data:Annotated[OAuth2PasswordRequestForm,Depends()],d
                             status_code=401)
     
     token = create_user_token(user.email, user.id, timedelta(minutes=time_to_live))
-    if app.state.redis.setex(token, time_to_live, user.id):
+    if app.state.redis.setex(token, 10000, user.id):
         print("token inserted")
     return JSONResponse(content={"status_code":200,
                                  "msg":"Login Successful"},
@@ -310,11 +308,11 @@ def create_user_token(email:str, user_id:int, ttl:timedelta):
 
 # POST:/user is used to insert user data into the database
 @app.post('/user', status_code=201)
-async def create_User(user: UserBase, db: db_dependency, request:Request):
+async def create_User(user: RegisterBase, db: db_dependency, request:Request):
 
     header = dict(request.headers)
 
-    if not header["x-token"]:
+    if not "x-token" in header:
         return JSONResponse(content={"status_code":422,
                                      "msg":"Unprocessable Entity",
                                      "detail":"Invalid Token"},
@@ -330,16 +328,16 @@ async def create_User(user: UserBase, db: db_dependency, request:Request):
                             status_code=401)
 
     user_id = app.state.redis.get(token).decode('UTF-8')
-    user = db.get(model.Users,user_id)
+    curr_user = db.get(model.Users,user_id)
 
     # checks if the current user has admin access
-    if user.role=="admin":
+    if curr_user.role=="admin":
         try:
             db_user = model.Users(name=user.name,
                                   email=user.email,
                                   password=bcrypt_context.hash(user.password),
                                   phone_no=user.phone_no,
-                                  role=user.role)
+                                  role="user")
 
             db.add(db_user)
             db.commit()
@@ -375,7 +373,7 @@ async def addSalary(request:Request, userSalary: SalaryBase, db: db_dependency):
 
     header = dict(request.headers)
 
-    if not header["x-token"]:
+    if not "x-token" in header:
         return JSONResponse(content={"status_code":422,
                                      "msg":"Unprocessable Entity",
                                      "detail":"Invalid Token"},
@@ -448,7 +446,7 @@ def delete_user(input: DeleteBase, db: db_dependency, request: Request):
     
     header = dict(request.headers)
 
-    if not header["x-token"]:
+    if not "x-token" in header:
         return JSONResponse(content={"status_code":422,
                                      "msg":"Unprocessable Entity",
                                      "detail":"Invalid Token"},
@@ -497,12 +495,12 @@ def update_user(input: UserUpdateBase, db: db_dependency, request:Request):
 
     header = dict(request.headers)
 
-    if not header["x-token"]:
+    if not "x-token" in header:
         return JSONResponse(content={"status_code":422,
                                      "msg":"Unprocessable Entity",
                                      "detail":"Invalid Token"},
                             status_code=422)
-    
+
     token = header['x-token']
 
     # checks for token validity
@@ -526,6 +524,13 @@ def update_user(input: UserUpdateBase, db: db_dependency, request:Request):
                                      "msg": "Forbidden",
                                      "detail": "Changing the ID for user is Forbidden"},
                             status_code=403)
+    
+    if field == "role":
+        return JSONResponse(content={"status_code": 403,
+                                     "msg": "Forbidden",
+                                     "detail": "Changing the role for user is Forbidden"},
+                            status_code=403)   
+     
     if field == "password":
         value = bcrypt_context.hash(value)
 
@@ -564,7 +569,7 @@ def update_salary(input:SalaryUpdateBase, db: db_dependency, request: Request):
 
     header = dict(request.headers)
 
-    if not header["x-token"]:
+    if not "x-token" in header:
         return JSONResponse(content={"status_code":422,
                                      "msg":"Unprocessable Entity",
                                      "detail":"Invalid Token"},
