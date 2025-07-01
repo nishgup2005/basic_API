@@ -68,12 +68,21 @@ class SalaryBase(BaseModel):
     is_partial: bool = False
     user_id: int
 
-# custom class to validate input for updation
-class InputBase(BaseModel):
-    user_id: int
+# custom class to validate input for user updation
+class UserUpdateBase(BaseModel):
+
     field: str
     value: str | int | bool | datetime
 
+# custom class to validate input for salary updation
+class SalaryUpdateBase(BaseModel):
+
+    user_id:int
+    field: str
+    value: str | int | bool | datetime
+
+class DeleteBase(BaseModel):
+    user_id:int
 
 # custom class to validate input for login
 class LoginBase(BaseModel):
@@ -132,20 +141,43 @@ class RegisterBase(BaseModel):
             raise ValueError("password must have atleast 1 special character")
         
         return value
-    
+
+
 # custom class to access a token
 class Token(BaseModel):
     access_token: str
     token_type: str
 
+
+class PassBase(BaseModel):
+    username: str
+    old_pass: str = Field(min_length=10)
+    new_pass: str = Field(min_length=10)
+
+    @field_validator('old_pass','new_pass', mode='after')
+    @classmethod
+    def validate_password(cls, value:str):
+        uprcnt=0
+        lwrcnt=0
+        spclcnt=0
+        for i in value:
+            if i.isupper():
+                uprcnt+=1
+            if i.islower():
+                lwrcnt+=1
+            if not i.isalnum():
+                spclcnt+=1
+        if not(uprcnt >= 1):
+            raise ValueError("password must have atleast 1 uppercase letter")
+        if not(lwrcnt >= 1):
+            raise ValueError("password must have atleast 1 lowercase letter")
+        if not(spclcnt >= 1):
+            raise ValueError("password must have atleast 1 special character")
+        
+        return value
+
+
 db_dependency = Annotated[session, Depends(get_db)]
-
-
-# @app.exception_handler(RequestValidationError)
-# def validation_exception_handler(request, exc):
-#     print(exc)
-#     return {"status_code":422,
-#     "msg":exc},
 
 
 # Landing Page
@@ -179,21 +211,22 @@ async def get_user(db: db_dependency):
                                  "msg": f"found {len(results)} user(s)"},
                         status_code=200)
 
-# GET:/user returns the User whos id matches with the input user_id
-# It takes the user_id as a path parameter
 
+# GET:/user returns the User whos session is currently logged
+# session management is performed using tokens 
 @app.get("/user", status_code=200)
 async def get_user_id(request:Request, db: db_dependency):
 
     header = dict(request.headers)
     token = header['x-token']
+
     if not app.state.redis.exists(token):
         return JSONResponse(content={"status_code":401,
                                      "msg":"Unauthorized",
                                      "detail":"Your session has logged out. Log in again"},
                             status_code=401)
+
     user_id = app.state.redis.get(token).decode('UTF-8')
-    print(user_id)
     result = (db
             .query(model.Users)
             .filter(model.Users.id==user_id).one_or_none()
@@ -202,56 +235,30 @@ async def get_user_id(request:Request, db: db_dependency):
     if not result:
         return JSONResponse(content={"status_code": 404,
                                      "msg": "User Not Found"},
-
                             status_code=404)
-    
+
     id = result.id
     name = result.name
 
     if result.salary:
         salary = result.salary[0].salary
-
         return JSONResponse(content={"status_code": 200,
                                      "user": {"user_id": id,
                                               "name": name,
                                               "salary": salary},
                                      "msg":f"user {id} found"},
-                            
                             status_code=200)
 
     else:
-
         return JSONResponse(content={"status_code": 200,
                                      "user": {"user_id": id,
                                               "name": name,
                                               "salary": None},
                                      "msg":f"user {id} found"},
-                            
                             status_code=200)
 
 
-# @app.post('/login',status_code=200)
-# async def user_login(user: LoginBase, db: db_dependency):
-
-#     email = user.email
-#     password = user.password
-#     cUser = (db.query(model.Users)
-#             .filter(model.Users.email==email)
-#             .first())
-
-#     if (password == cUser[0].password):
-#         return JSONResponse(content={"status_code":200,
-#                                      "msg":"Login Successful"
-#                                      },
-#                             headers={"x-user-token":cUser[0].id},
-#                             status_code=200)
-
-#     else:
-#         return JSONResponse(content={"status_code":401,
-#                                      "msg":"Incorrect Username/Password"},
-#                             status_code=401)
-
-
+# /register is used to register new users 
 @app.post('/register',status_code=201)
 async def user_register(user:RegisterBase, db:db_dependency):
     try:
@@ -280,6 +287,10 @@ async def user_register(user:RegisterBase, db:db_dependency):
                         status_code=201)
 
 
+# /login is used to log in to the user database
+# it generates a log in token which is a JWT token 
+# attaches it to the header of  the response 
+# this token is authenticated at the user portal
 @app.post('/login',response_model=Token)
 async def token_login(form_data:Annotated[OAuth2PasswordRequestForm,Depends()],db:db_dependency):
     user = authenticateUser(form_data.username, form_data.password, db)
@@ -299,105 +310,167 @@ async def token_login(form_data:Annotated[OAuth2PasswordRequestForm,Depends()],d
                         status_code=200)
 
 
+# authenticate the user with the a valid password 
 def authenticateUser(email: EmailStr, password:str, db:db_dependency) -> model.Users:
     user = (db.query(model.Users)
             .filter(model.Users.email==email)
             .first())
     if not user:
         return False
-    
+
     if not bcrypt_context.verify(password, user.password):
         return False
     
     return user
 
+# if valid password then user token is generated 
 def create_user_token(email:str, user_id:int, ttl:timedelta):
     encode={"sub":email, "id":user_id}
     expires = datetime.now()+ttl
     encode.update({"exp":expires})
     return jwt.encode(encode, secret_key, algorithm=hash)
 
+
 # POST:/user is used to insert user data into the database
-# After inserting user data it is important to call POST:/salary
-# as well for the inserted user-id
-
-
 @app.post('/user', status_code=201)
-async def create_User(user: UserBase, db: db_dependency):
-    try:
-        db_user = model.Users(name=user.name,
-                              email=user.email,
-                              password=user.password,
-                              phone_no=user.phone_no,
-                              role=user.role)
+async def create_User(user: UserBase, db: db_dependency, request:Request):
 
-        db.add(db_user)
-        db.commit()
-        db.refresh(db_user)
+    header = dict(request.headers)
+    token = header['x-token']
+
+    # checks for token validity
+    if not app.state.redis.exists(token):
+        return JSONResponse(content={"status_code":401,
+                                     "msg":"Unauthorized",
+                                     "detail":"Your session has logged out. Log in again"},
+                            status_code=401)
+
+    user_id = app.state.redis.get(token).decode('UTF-8')
+    user = db.get(model.Users,user_id)
+
+    # checks if the current user has admin access
+    if user.role=="admin":
+        try:
+            db_user = model.Users(name=user.name,
+                                  email=user.email,
+                                  password=bcrypt_context.hash(user.password),
+                                  phone_no=user.phone_no,
+                                  role=user.role)
+
+            db.add(db_user)
+            db.commit()
+            db.refresh(db_user)
 
 
-    except Exception as e:
-        msg=str(e.orig).split(':')[-1].replace('\n', '').strip()
-        return JSONResponse(content={"status_code": 422,
-                                     "msg": "Unprocessable Entity",
-                                     "detail":msg},
-                            
-                            status_code=422)
-    
+        except Exception as e:
+            msg=str(e.orig).split(':')[-1].replace('\n', '').strip()
+            return JSONResponse(content={"status_code": 422,
+                                        "msg": "Unprocessable Entity",
+                                        "detail":msg},
+                                
+                                status_code=422)
+        
 
-    return JSONResponse(content={"status_code":201,
-                                 "user_id": db_user.id,
-                                 "msg": f"user {db_user.name} "
-                                 "has been added successfully."},
-                                 status_code=201)
+        return JSONResponse(content={"status_code":201,
+                                    "user_id": db_user.id,
+                                    "msg": f"user {db_user.name} "
+                                    "has been added successfully."},
+                                    status_code=201)
+    else:
+        return JSONResponse(content={"status_code":401,
+                                     "msg":"Unauthorized",
+                                     "detail":"User is not authorized to create user"},
+                            status_code=401)
 
 
 # POST:/salary adds the input data in the salary table for
 # a correseponding user_id
 # Salary id is generated automatically in the database
-
-
 @app.post("/salary", status_code=400)
-async def addSalary(userSalary: SalaryBase, db: db_dependency):
-    user=db.get(model.Users,userSalary.user_id)
-    if not user:
-        return JSONResponse(content={"status_code": 404,
-                                     "msg": "User Not Found"},
+async def addSalary(request:Request, userSalary: SalaryBase, db: db_dependency):
 
-                            status_code=404)
-    
-    if user.salary:
+    header = dict(request.headers)
+    token = header['x-token']
+
+    # checks for token validity
+    if not app.state.redis.exists(token):
+        return JSONResponse(content={"status_code":401,
+                                     "msg":"Unauthorized",
+                                     "detail":"Your session has logged out. Log in again"},
+                            status_code=401)
+
+    user_id = app.state.redis.get(token).decode('UTF-8')
+    user = db.get(model.Users,user_id)
+
+    # checks if the current user has admin access
+    if user.role=="admin":
+        user=db.get(model.Users,userSalary.user_id)
+
+        if not user:
+            return JSONResponse(content={"status_code": 404,
+                                        "msg": "User Not Found"},
+                                status_code=404)
+        
+        if user.salary:
+                return JSONResponse(content={"status_code": 422,
+                                            "msg": "Unprocessable Entity",
+                                            "detail":"Salary for this user exists"},
+                                    status_code=422)
+        
+        try:
+            db_salary = model.Salary(salary=userSalary.salary,
+                                    credited_out=userSalary.credited_out,
+                                    credited_by=userSalary.credited_by,
+                                    is_partial=userSalary.is_partial,
+                                    user_id=userSalary.user_id)
+            db.add(db_salary)
+            db.commit()
+            db.refresh(db_salary)
+
+        except Exception as e:
+            msg=str(e.orig).split(':')[-1].replace('\n', '').strip()
             return JSONResponse(content={"status_code": 422,
-                                         "msg": "Unprocessable Entity",
-                                         "detail":"Salary for this user exists"},
-
+                                        "msg": "Unprocessable Entity",
+                                        "detail":msg},
+                                
                                 status_code=422)
 
-    db_salary = model.Salary(salary=userSalary.salary,
-                            credited_out=userSalary.credited_out,
-                            credited_by=userSalary.credited_by,
-                            is_partial=userSalary.is_partial,
-                            user_id=userSalary.user_id)
-    db.add(db_salary)
-    db.commit()
-    db.refresh(db_salary)
-
-    return JSONResponse(content={"status_code": 201,
-                                    "salary": {"salary_ID": db_salary.id,
-                                            "salary": db_salary.salary,
-                                            "user_id": db_salary.user_id},
-                                    "msg": f"Salary for user {db_salary.user_id} has been added successfully."
-    })
+        return JSONResponse(content={"status_code": 201,
+                                        "salary": {"salary_ID": db_salary.id,
+                                                "salary": db_salary.salary,
+                                                "user_id": db_salary.user_id},
+                                        "msg": f"Salary for user {db_salary.user_id} has been added successfully."},
+                            status_code=201)
+    
+    else:
+        return JSONResponse(content={"status_code":401,
+                                     "msg":"Unauthorized",
+                                     "detail":"User is not authorized to create salary"},
+                            status_code=401)
 
     
 
 # /deleteUser is used to delete a user and their salary
 # with the given user_id
-
-
 @app.delete("/user", status_code=200)
-def delete_user(user_id: int, db: db_dependency):
-        
+def delete_user(input: DeleteBase, db: db_dependency, request: Request):
+    
+    header = dict(request.headers)
+    token = header['x-token']
+
+    # checks for token validity
+    if not app.state.redis.exists(token):
+        return JSONResponse(content={"status_code":401,
+                                     "msg":"Unauthorized",
+                                     "detail":"Your session has logged out. Log in again"},
+                            status_code=401)
+
+    user_id = app.state.redis.get(token).decode('UTF-8')
+    user = db.get(model.Users,user_id)
+
+    # checks if the current user has admin access
+    if user.role=="admin":
+        user_id=input.user_id
         user = db.get(model.Users, user_id)
 
         if user:
@@ -405,23 +478,41 @@ def delete_user(user_id: int, db: db_dependency):
         else :
             return JSONResponse(content={"status_code": 404,
                                      "msg": "User Not Found"},
-                                     status_code=404)
+                                status_code=404)
 
         db.commit()
-
         return JSONResponse(content={"status_code":200,
                                      "user_id": user_id,
                                      "msg":f"user {user_id} has been deleted successfully"},
-                                     status_code=200)
+                            status_code=200)
+    
+    else:
+        return JSONResponse(content={"status_code":401,
+                                     "msg":"Unauthorized",
+                                     "detail":"User is not authorized to create salary"},
+                            status_code=401)
 
 
 # /updateUser is used to update the value of input field inside the User Table
-
-
 @app.put("/user")
-def update_user(input: InputBase, db: db_dependency):
+def update_user(input: UserUpdateBase, db: db_dependency, request:Request):
 
-    user_id = input.user_id
+    header = dict(request.headers)
+    token = header['x-token']
+
+    # checks for token validity
+    if not app.state.redis.exists(token):
+        return JSONResponse(content={"status_code":401,
+                                     "msg":"Unauthorized",
+                                     "detail":"Your session has logged out. Log in again"},
+                            status_code=401)
+
+    user_id = app.state.redis.get(token).decode('UTF-8')
+    user = db.get(model.Users, user_id)
+    if not user:
+        return JSONResponse(content={"status_code": 404,
+                                     "msg": "User Not Found"},
+                                     status_code=404)
     field = input.field
     value = input.value
     
@@ -430,6 +521,8 @@ def update_user(input: InputBase, db: db_dependency):
                                      "msg": "Forbidden",
                                      "detail": "Changing the ID for user is Forbidden"},
                                      status_code=403)
+    if field == "password":
+        value = bcrypt_context.hash(value)
 
     if not isinstance(value,str):
         return JSONResponse(content={"status_code": 422,
@@ -437,11 +530,7 @@ def update_user(input: InputBase, db: db_dependency):
                                      "detail": "Invalid Input Format for chosen field"},
                                      status_code=422)
 
-    user = db.get(model.Users, user_id)
-    if not user:
-        return JSONResponse(content={"status_code": 404,
-                                     "msg": "User Not Found"},
-                                     status_code=404)
+
     
     if hasattr(user, field):
         before = getattr(user, field)
@@ -466,60 +555,77 @@ def update_user(input: InputBase, db: db_dependency):
 
 
 @app.patch("/salary")
-def update_salary(input:InputBase, db: db_dependency):
+def update_salary(input:SalaryUpdateBase, db: db_dependency, request: Request):
 
-    user_id = input.user_id
-    field = input.field
-    value = input.value
-    invalid_input=False
+    header = dict(request.headers)
+    token = header['x-token']
 
+    # checks for token validity
+    if not app.state.redis.exists(token):
+        return JSONResponse(content={"status_code":401,
+                                     "msg":"Unauthorized",
+                                     "detail":"Your session has logged out. Log in again"},
+                            status_code=401)
+
+    user_id = app.state.redis.get(token).decode('UTF-8')
+    user = db.get(model.Users,user_id)
     
-    if field not in ["salary","user_id"] and not isinstance(value,int):
-        invalid_input=True
-    elif field == "credited_by" and not isinstance(value,str):
-        invalid_input=True
-    elif field == "credited_out"and not isinstance(value,datetime.isoformat(value)):
-        invalid_input=True
-    elif field == "is_partial" and not isinstance(value,bool):
-        invalid_input=True
+    # checks if the current user has admin access
+    if user.role=="admin":
+        user_id = input.user_id
+        field = input.field
+        value = input.value
+        invalid_input=False
 
-    if invalid_input:
-        return JSONResponse(content={"status_code": 422,
-                                     "msg": "Unprocessable Entity.",
-                                     "detail": "Invalid Input Format for chosen Field"},
-                                     status_code=422)
 
-    user = db.get(model.Users, user_id)
-    if not user:
-        return JSONResponse(content={"status_code": 404,
-                                     "msg": "User Not Found"},
-                                     status_code=404)
-    if not user.salary:
-        return JSONResponse(content={"status_code": 422,
-                                     "msg": "Unprocessable Entity.",
-                                     "detail": "Salary for User does not exist"},
-                                     status_code=422)
-    
-    salary = user.salary[0]
+        if field not in ["salary","user_id"] and not isinstance(value,int):
+            invalid_input=True
+        elif field == "credited_by" and not isinstance(value,str):
+            invalid_input=True
+        elif field == "credited_out"and not isinstance(value,datetime.isoformat(value)):
+            invalid_input=True
+        elif field == "is_partial" and not isinstance(value,bool):
+            invalid_input=True
 
-    if hasattr(salary, field):
-        before = getattr(salary, field)
-        setattr(salary, field, value)
-        db.commit()
-        return {
-            "status_code":200,
-            "before": before,
-            "after": getattr(salary, field),
-            "user_id":user.id,
-            "msg": f"Attribute {field} was updated with value {value} for salary with user_id {user_id} successfully"
-        }
+        if invalid_input:
+            return JSONResponse(content={"status_code": 422,
+                                        "msg": "Unprocessable Entity.",
+                                        "detail": "Invalid Input Format for chosen Field"},
+                                        status_code=422)
+
+        user = db.get(model.Users, user_id)
+        if not user:
+            return JSONResponse(content={"status_code": 404,
+                                        "msg": "User Not Found"},
+                                        status_code=404)
+        if not user.salary:
+            return JSONResponse(content={"status_code": 422,
+                                        "msg": "Unprocessable Entity.",
+                                        "detail": "Salary for User does not exist"},
+                                        status_code=422)
+        
+        salary = user.salary[0]
+
+        if hasattr(salary, field):
+            before = getattr(salary, field)
+            setattr(salary, field, value)
+            db.commit()
+            return {
+                "status_code":200,
+                "before": before,
+                "after": getattr(salary, field),
+                "user_id":user.id,
+                "msg": f"Attribute {field} was updated with value {value} for salary with user_id {user_id} successfully"
+            }
+        else:
+            return JSONResponse(content={"status_code": 422,
+                                        "msg": "Unprocessable Entity.",
+                                        "detail": "Field for Salary does not exist"},
+                                        status_code=422)
+
     else:
-        return JSONResponse(content={"status_code": 422,
-                                     "msg": "Unprocessable Entity.",
-                                     "detail": "Field for Salary does not exist"},
-                                     status_code=422)
+        return JSONResponse(content={"status_code":401,
+                                     "msg":"Unauthorized",
+                                     "detail":"User is not authorized to create salary"},
+                            status_code=401)
 
-
-# @app.get('/test')
-# async def test_method(request:Request, db: db_dependency):
-    
