@@ -1,5 +1,5 @@
 from typing import Annotated
-from fastapi import FastAPI, Depends, Request, Response
+from fastapi import FastAPI, Depends, Request, Response, Header
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, EmailStr, field_validator, Field
 import model
@@ -147,6 +147,28 @@ class Token(BaseModel):
 
 db_dependency = Annotated[session, Depends(get_db)]
 
+async def get_user_token(x_token: Annotated[str, Header()] = None):
+    return x_token
+
+async def get_curr_user(token:Annotated[str,Depends(get_user_token)], db:db_dependency):
+    if not token:
+        return JSONResponse(content={"status_code":401,
+                                     "msg":"Unauthorized",
+                                     "detail":"Invalid Token"},
+                            status_code=401)
+
+    if not app.state.redis.exists(token):
+        return JSONResponse(content={"status_code":401,
+                                     "msg":"Unauthorized",
+                                     "detail":"Invalid Token"},
+                            status_code=401)
+    user_id = app.state.redis.get(token).decode('UTF-8')
+    # app.state.redis.setex(token, 1000, user_id)
+    user = db.get(model.Users,user_id)
+    return user
+
+@app.get("/test")
+
 
 # Landing Page
 @app.get("/")
@@ -156,12 +178,12 @@ async def read_root():
 
 # /users returns all the users in the database
 @app.get("/users")
-async def get_user(db: db_dependency):
-    results = (
+async def get_users(db: db_dependency):
+    all_users = (
         db.query(model.Users).all()
     )
 
-    if not results:
+    if not all_users:
         return JSONResponse(content={"status_code": 404,
                                      "msg": "No Users Found"},
 
@@ -172,64 +194,39 @@ async def get_user(db: db_dependency):
             "salary": (i.salary[0].salary 
                        if i.salary 
                        else None)}
-           for i in results ]
+           for i in all_users ]
 
     return JSONResponse(content={"status_code": 200,
                                  "users": users,
-                                 "msg": f"found {len(results)} user(s)"},
+                                 "msg": f"found {len(users)} user(s)"},
                         status_code=200)
 
 
 # GET:/user returns the User whos session is currently logged
 # session management is performed using tokens 
 @app.get("/user", status_code=200)
-async def get_user_id(request:Request, db: db_dependency):
+async def get_user(curr_user: Annotated[model.Users, Depends(get_curr_user)]):
 
-    header = dict(request.headers)
-
-    if not "x-token" in header:
-        return JSONResponse(content={"status_code":422,
-                                     "msg":"Unprocessable Entity",
-                                     "detail":"Invalid Token"},
-                            status_code=422)
-
-    token = header['x-token']
-
-    if not app.state.redis.exists(token):
-        return JSONResponse(content={"status_code":401,
-                                     "msg":"Unauthorized",
-                                     "detail":"Your session has logged out. Log in again"},
-                            status_code=401)
-
-    user_id = app.state.redis.get(token).decode('UTF-8')
-    result = (db
-            .query(model.Users)
-            .filter(model.Users.id==user_id).one_or_none()
-            )
-
-    if not result:
+    if not curr_user:
         return JSONResponse(content={"status_code": 404,
                                      "msg": "User Not Found"},
                             status_code=404)
 
-    id = result.id
-    name = result.name
-
-    if result.salary:
-        salary = result.salary[0].salary
+    if curr_user.salary:
+        salary = curr_user.salary[0].salary
         return JSONResponse(content={"status_code": 200,
-                                     "user": {"user_id": id,
-                                              "name": name,
+                                     "user": {"user_id": curr_user.id,
+                                              "name": curr_user.name,
                                               "salary": salary},
-                                     "msg":f"user {id} found"},
+                                     "msg":f"user {curr_user.id} found"},
                             status_code=200)
 
     else:
         return JSONResponse(content={"status_code": 200,
-                                     "user": {"user_id": id,
-                                              "name": name,
+                                     "user": {"user_id": curr_user.id,
+                                              "name": curr_user.name,
                                               "salary": None},
-                                     "msg":f"user {id} found"},
+                                     "msg":f"user {curr_user.id} found"},
                             status_code=200)
 
 
@@ -267,9 +264,9 @@ async def user_register(user:RegisterBase, db:db_dependency):
 # attaches it to the header of  the response 
 # this token is authenticated at the user portal
 @app.post('/login',response_model=Token)
-async def token_login(form_data:Annotated[OAuth2PasswordRequestForm,Depends()],db:db_dependency):
-    user = authenticateUser(form_data.username, form_data.password, db)
+async def token_login(form_data: Annotated[OAuth2PasswordRequestForm,Depends()], db:db_dependency):
 
+    user = authenticateUser(form_data.username, form_data.password, db)
     if not user:
         return JSONResponse(content={"status_code":401,
                                      "msg":"Unauthorized",
@@ -308,27 +305,7 @@ def create_user_token(email:str, user_id:int, ttl:timedelta):
 
 # POST:/user is used to insert user data into the database
 @app.post('/user', status_code=201)
-async def create_User(user: RegisterBase, db: db_dependency, request:Request):
-
-    header = dict(request.headers)
-
-    if not "x-token" in header:
-        return JSONResponse(content={"status_code":422,
-                                     "msg":"Unprocessable Entity",
-                                     "detail":"Invalid Token"},
-                            status_code=422)
-
-    token = header['x-token']
-
-    # checks for token validity
-    if not app.state.redis.exists(token):
-        return JSONResponse(content={"status_code":401,
-                                     "msg":"Unauthorized",
-                                     "detail":"Your session has logged out. Log in again"},
-                            status_code=401)
-
-    user_id = app.state.redis.get(token).decode('UTF-8')
-    curr_user = db.get(model.Users,user_id)
+async def create_User(user: RegisterBase, db: db_dependency, curr_user: Annotated[model.Users, Depends(get_curr_user)]):
 
     # checks if the current user has admin access
     if curr_user.role=="admin":
@@ -369,30 +346,11 @@ async def create_User(user: RegisterBase, db: db_dependency, request:Request):
 # a correseponding user_id
 # Salary id is generated automatically in the database
 @app.post("/salary", status_code=400)
-async def addSalary(request:Request, userSalary: SalaryBase, db: db_dependency):
-
-    header = dict(request.headers)
-
-    if not "x-token" in header:
-        return JSONResponse(content={"status_code":422,
-                                     "msg":"Unprocessable Entity",
-                                     "detail":"Invalid Token"},
-                            status_code=422)
-
-    token = header['x-token']
-
-    # checks for token validity
-    if not app.state.redis.exists(token):
-        return JSONResponse(content={"status_code":401,
-                                     "msg":"Unauthorized",
-                                     "detail":"Your session has logged out. Log in again"},
-                            status_code=401)
-
-    user_id = app.state.redis.get(token).decode('UTF-8')
-    user = db.get(model.Users,user_id)
+async def addSalary(userSalary: SalaryBase, db: db_dependency, curr_user: Annotated[model.Users, Depends(get_curr_user)]):
 
     # checks if the current user has admin access
-    if user.role=="admin":
+    if curr_user.role=="admin":
+
         user=db.get(model.Users,userSalary.user_id)
 
         if not user:
@@ -442,46 +400,28 @@ async def addSalary(request:Request, userSalary: SalaryBase, db: db_dependency):
 # /deleteUser is used to delete a user and their salary
 # with the given user_id
 @app.delete("/user", status_code=200)
-def delete_user(input: DeleteBase, db: db_dependency, request: Request):
-    
-    header = dict(request.headers)
-
-    if not "x-token" in header:
-        return JSONResponse(content={"status_code":422,
-                                     "msg":"Unprocessable Entity",
-                                     "detail":"Invalid Token"},
-                            status_code=422)
-
-    token = header['x-token']
-
-    # checks for token validity
-    if not app.state.redis.exists(token):
-        return JSONResponse(content={"status_code":401,
-                                     "msg":"Unauthorized",
-                                     "detail":"Your session has logged out. Log in again"},
-                            status_code=401)
-
-    user_id = app.state.redis.get(token).decode('UTF-8')
-    user = db.get(model.Users,user_id)
+def delete_user(input: DeleteBase, db: db_dependency, curr_user: Annotated[model.Users, Depends(get_curr_user)]):
 
     # checks if the current user has admin access
-    if user.role=="admin":
-        user_id=input.user_id
-        user = db.get(model.Users, user_id)
+    if curr_user.role=="admin":
+        user = db.get(model.Users, input.user_id)
 
-        if user:
-            db.delete(user)
-        else :
+        if not user:
             return JSONResponse(content={"status_code": 404,
                                      "msg": "User Not Found"},
                                 status_code=404)
-
+        if user.role == "admin":
+            return JSONResponse(content={"status_code": 403,
+                                     "msg": "Forbidden",
+                                     "detail": "Deleteing the admin ID is Forbidden"},
+                            status_code=403)
+        db.delete(user)
         db.commit()
         return JSONResponse(content={"status_code":200,
-                                     "user_id": user_id,
-                                     "msg":f"user {user_id} has been deleted successfully"},
+                                     "user_id": input.user_id,
+                                     "msg":f"user {input.user_id} has been deleted successfully"},
                             status_code=200)
-    
+
     else:
         return JSONResponse(content={"status_code":401,
                                      "msg":"Unauthorized",
@@ -491,32 +431,14 @@ def delete_user(input: DeleteBase, db: db_dependency, request: Request):
 
 # /updateUser is used to update the value of input field inside the User Table
 @app.put("/user")
-def update_user(input: UserUpdateBase, db: db_dependency, request:Request):
+def update_user(input: UserUpdateBase, curr_user: Annotated[model.Users, Depends(get_curr_user)], db: db_dependency):
 
-    header = dict(request.headers)
-
-    if not "x-token" in header:
-        return JSONResponse(content={"status_code":422,
-                                     "msg":"Unprocessable Entity",
-                                     "detail":"Invalid Token"},
-                            status_code=422)
-
-    token = header['x-token']
-
-    # checks for token validity
-    if not app.state.redis.exists(token):
-        return JSONResponse(content={"status_code":401,
-                                     "msg":"Unauthorized",
-                                     "detail":"Your session has logged out. Log in again"},
-                            status_code=401)
-
-    user_id = app.state.redis.get(token).decode('UTF-8')
-    user = db.get(model.Users, user_id)
-    if not user:
+    if not curr_user:
         return JSONResponse(content={"status_code": 404,
                                      "msg": "User Not Found"},
                             status_code=404)
-    field = input.field
+
+    field = input.field.lower()
     value = input.value
     
     if field == "id":
@@ -528,31 +450,37 @@ def update_user(input: UserUpdateBase, db: db_dependency, request:Request):
     if field == "role":
         return JSONResponse(content={"status_code": 403,
                                      "msg": "Forbidden",
-                                     "detail": "Changing the role for user is Forbidden"},
-                            status_code=403)   
-     
-    if field == "password":
-        value = bcrypt_context.hash(value)
+                                     "detail": "Changing the Role for user is Forbidden"},
+                            status_code=403)
+    
+    if field == "salary":
+        return JSONResponse(content={"status_code": 422,
+                                     "msg": "Unprocessable Entity",
+                                     "detail": "Salary cannot be changed through user table"},
+                            status_code=422)
 
     if not isinstance(value,str):
         return JSONResponse(content={"status_code": 422,
                                      "msg": "Unprocessable Entity",
                                      "detail": "Invalid Input Format for chosen field"},
                             status_code=422)
+    
+    if field == "password":
+        value = bcrypt_context.hash(value)
 
 
     
-    if hasattr(user, field):
-        before = getattr(user, field)
-        setattr(user, field, value)
+    if hasattr(curr_user, field):
+        before = getattr(curr_user, field)
+        setattr(curr_user, field, value)
         db.commit()
         return {
 
             "status_code":200,
             "before": before,
-            "after": getattr(user, field),
-            "user_id":user.id,
-            "msg": f"Attribute {field} was updated with value {value} for user_id {user_id} successfully"
+            "after": getattr(curr_user, field),
+            "user_id":curr_user.id,
+            "msg": f"Attribute {field} was updated with value {value} for user_id {curr_user.id} successfully"
         }
     else:
         return JSONResponse(content={"status_code": 422,
@@ -565,42 +493,30 @@ def update_user(input: UserUpdateBase, db: db_dependency, request:Request):
 
 
 @app.patch("/salary")
-def update_salary(input:SalaryUpdateBase, db: db_dependency, request: Request):
-
-    header = dict(request.headers)
-
-    if not "x-token" in header:
-        return JSONResponse(content={"status_code":422,
-                                     "msg":"Unprocessable Entity",
-                                     "detail":"Invalid Token"},
-                            status_code=422)
-
-    token = header['x-token']
-
-    # checks for token validity
-    if not app.state.redis.exists(token):
-        return JSONResponse(content={"status_code":401,
-                                     "msg":"Unauthorized",
-                                     "detail":"Your session has logged out. Log in again"},
-                            status_code=401)
-
-    user_id = app.state.redis.get(token).decode('UTF-8')
-    user = db.get(model.Users,user_id)
+def update_salary(input:SalaryUpdateBase, db: db_dependency, curr_user: Annotated[model.Users, Depends(get_curr_user)]):
     
     # checks if the current user has admin access
-    if user.role=="admin":
+    if curr_user.role=="admin":
         user_id = input.user_id
-        field = input.field
+        field = input.field.lower()
         value = input.value
         invalid_input=False
 
+        if field == "id":
+            return JSONResponse(content={"status_code": 403,
+                                        "msg": "Forbidden",
+                                        "detail": "Changing the ID for salary is Forbidden"},
+                                status_code=403)
 
-        if field not in ["salary","user_id"] and not isinstance(value,int):
+        if field in ["salary","user_id"] and not isinstance(value,int):
             invalid_input=True
         elif field == "credited_by" and not isinstance(value,str):
             invalid_input=True
-        elif field == "credited_out"and not isinstance(value,datetime.isoformat(value)):
-            invalid_input=True
+        elif field == "credited_out":
+            try:
+                value = datetime.isoformat(value)
+            except Exception as e:
+                invalid_input=True
         elif field == "is_partial" and not isinstance(value,bool):
             invalid_input=True
 
@@ -644,4 +560,3 @@ def update_salary(input:SalaryUpdateBase, db: db_dependency, request: Request):
                                      "msg":"Unauthorized",
                                      "detail":"User is not authorized to create salary"},
                             status_code=401)
-    
