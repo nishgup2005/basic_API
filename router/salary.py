@@ -13,7 +13,7 @@ from ..model import Salary, Users
 
 
 
-app = APIRouter()
+router = APIRouter()
 
 db_dependency = Annotated[session, Depends(get_db)]
 
@@ -45,7 +45,7 @@ form_dependency = Annotated[OAuth2PasswordRequestForm,Depends()]
 # a correseponding user_id
 # Salary id is generated automatically in the database
 
-@app.post("/salary", status_code=400)
+@router.post("/salary", status_code=400)
 async def addSalary(userSalary: SalaryBase, db: db_dependency, curr_user: user_dependency):
 
     # checks if the current user has admin access
@@ -97,7 +97,7 @@ async def addSalary(userSalary: SalaryBase, db: db_dependency, curr_user: user_d
 
 # PATCH:/salary is used to update the value of input field
 # inside the Salary table
-@app.patch("/salary")
+@router.patch("/salary")
 def update_salary(input:SalaryUpdateBase, db: db_dependency, curr_user: user_dependency):
     
     # checks if the current user has admin access

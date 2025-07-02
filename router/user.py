@@ -12,7 +12,7 @@ from pydantic import EmailStr
 from passlib.context import CryptContext
 from secrets import token_hex
 
-app = APIRouter()
+router = APIRouter()
 
 db_dependency = Annotated[session, Depends(get_db)]
 
@@ -59,12 +59,12 @@ bcrypt_context = CryptContext(schemes=['bcrypt'], deprecated='auto')
 # oauth2_bearer = OAuth2PasswordBearer(tokenUrl='/login')
 
 
-@app.get("/")
+@router.get("/")
 async def read_root():
     return {"msg":"Welcome to User Manipulation Backend"}
 
 # /users returns all the users in the database
-@app.get("/users")
+@router.get("/users")
 async def get_users(db: db_dependency):
     all_users = (
         db.query(Users).all()
@@ -91,7 +91,7 @@ async def get_users(db: db_dependency):
 
 # GET:/user returns the User whos session is currently logged
 # session management is performed using tokens 
-@app.get("/user", status_code=200)
+@router.get("/user", status_code=200)
 async def get_user(curr_user: user_dependency):
 
     if not curr_user:
@@ -117,7 +117,7 @@ async def get_user(curr_user: user_dependency):
                             status_code=200)
 
 
-@app.post('/register',status_code=201)
+@router.post('/register',status_code=201)
 async def user_register(user:RegisterBase, db:db_dependency):
     try:
         db_user = Users(name=user.name,
@@ -149,7 +149,7 @@ async def user_register(user:RegisterBase, db:db_dependency):
 # it generates a log in token which is a JWT token 
 # attaches it to the header of  the response 
 # this token is authenticated at the user portal
-@app.post('/login',response_model=Token)
+@router.post('/login',response_model=Token)
 async def token_login(form_data: form_dependency, db:db_dependency, request:Request):
 
     user = authenticateUser(form_data.username, form_data.password, db)
@@ -190,7 +190,7 @@ def create_user_token(email:str, user_id:int, ttl:timedelta) -> str:
 
 
 # POST:/user is used to insert user data into the database
-@app.post('/user', status_code=201)
+@router.post('/user', status_code=201)
 async def create_User(user: RegisterBase, db: db_dependency, curr_user: user_dependency):
 
     # checks if the current user has admin access
@@ -228,7 +228,7 @@ async def create_User(user: RegisterBase, db: db_dependency, curr_user: user_dep
                             status_code=401)
 
 
-@app.delete("/user", status_code=200)
+@router.delete("/user", status_code=200)
 def delete_user(input: DeleteBase, db: db_dependency, curr_user: user_dependency):
 
     # checks if the current user has admin access
@@ -258,7 +258,7 @@ def delete_user(input: DeleteBase, db: db_dependency, curr_user: user_dependency
                             status_code=401)
 
 # /updateUser is used to update the value of input field inside the User Table
-@app.put("/user")
+@router.put("/user")
 def update_user(input: UserUpdateBase, curr_user: user_dependency, db: db_dependency):
 
     if not curr_user:
