@@ -129,65 +129,58 @@ async def token_login(form_data: form_dependency, db:db_dependency, request:Requ
                         status_code=200)
 
 
-@router.post('/verify')
-async def user_verify(db: db_dependency, request: Request, path: str|None = None, email: EmailBase|None = None,):
-    if path:
-        try:
-            if not request.state.app.redis.exists(path):
-                return JSONResponse(content = {"status_code":401,
-                                                "msg":"Invalid Verification URL"},
-                                    status_code=401)
-            valid_id=request.state.app.redis.get(path)
-            decoded_id=encoder.loads(path)
-            if valid_id != decoded_id:
-                return JSONResponse(content = {"status_code":401,
-                                                "msg":"Invalid Verification URL"},
-                                    status_code=401)
-            user = db.get(Users, decoded_id)
-            # if not user:
-            #     return JSONResponse(content = {"status_code":401,
-            #                                     "msg":"Invalid Verification URL"},
-            #                         status_code=401)
-            token = create_user_token(user.email, user.id, timedelta(minutes=5))
-            if request.app.state.redis.setex(token, 300, user.id):
-                print("token inserted")
-            user.is_active = True
-            db.commit()
-            return JSONResponse(content={"status_code":200,
-                                        "msg":"Login Successful",
-                                        "return to home page":""},
-                                headers={"x-token":token},
-                                status_code=200)
-        except BadSignature as e:
-                return JSONResponse(content = {"status_code":401,
-                                                "msg":"Invalid Verification URL"},
-                                    status_code=401)
-
-    elif email:
-        user  = db.query(Users).filter(Users.email == email.address).first()
-        if not user:
-                return JSONResponse(content = {"status_code":401,
-                                                "msg":"Invalid Verification email"},
-                                    status_code=401)
-        email = [email.address]
-        name = user.name
-        user_id = user.id
-        name = user.name
-        encoded_url = encoder.dumps(user_id)
-        html = f"""<h1> Hello {name}</h1>
-                <a href="http://127.0.0.1:8000/verify?path={encoded_url}"> Verify Email here</a>"""
-
-        message = create_message(recipients=email, subject = "Welcome User", body=html)
-        await mail.send_message(message=message)
-
-        request.app.state.redis.setex(encoded_url,300,user_id)
-
+@router.get('/verify')
+async def user_verify_path(db: db_dependency, request: Request, path: str):
+    try:
+        if not request.app.state.redis.exists(path):
+            print("galti exists mei hai")
+            return JSONResponse(content = {"status_code":401,
+                                           "msg":"Invalid Verification URL galti exists mei hai"},
+                                status_code=401)
+        valid_id=int(request.app.state.redis.get(path).decode("utf-8"))
+        decoded_id=encoder.loads(path)
+        if valid_id != decoded_id:
+            print(valid_id,decoded_id,sep="\n")
+            return JSONResponse(content = {"status_code":401,
+                                           "msg":"Invalid Verification URL galti matching mei hai"},
+                                status_code=401)
+        user = db.get(Users, decoded_id)
+        token = create_user_token(user.email, user.id, timedelta(minutes=5))
+        if request.app.state.redis.setex(token, 300, user.id):
+            print("token inserted")
+        user.is_active = True
+        db.commit()
         return JSONResponse(content={"status_code":200,
-                                     "msg":"Email sent successfully"},
+                                     "msg":"Login Successful",
+                                     "return to home page":""},
+                            headers={"x-token":token},
                             status_code=200)
-    
-    else:
-        return JSONResponse(content={"status_code": 422,
-                                     "msg": "Unprocessable Entity",
-                                     "detail": "Missing URL / Email"},
-                            status_code=422)
+    except BadSignature as e:
+            return JSONResponse(content = {"status_code":401,
+                                           "msg":"Invalid Verification URL galti signature mei hai"},
+                                status_code=401)
+
+
+@router.post('/verify')
+async def user_verify_email(db: db_dependency, request: Request, email: EmailBase):
+    user  = db.query(Users).filter(Users.email == email.address).first()
+    if not user:
+            return JSONResponse(content = {"status_code":401,
+                                           "msg":"Invalid Verification email"},
+                                status_code=401)
+    emails = [email.address]
+    name = user.name
+    user_id = user.id
+    name = user.name
+    encoded_url = encoder.dumps(user_id)
+    html = f"""<h1> Hello {name}</h1>
+            <a href="http://127.0.0.1:8000/verify?path={encoded_url}"> Verify Email here</a>"""
+
+    message = create_message(recipients=emails, subject = "Welcome User", body=html)
+    await mail.send_message(message=message)
+
+    request.app.state.redis.setex(encoded_url,300,user_id)
+
+    return JSONResponse(content={"status_code":200,
+                                 "msg":"Email sent successfully"},
+                        status_code=200)
