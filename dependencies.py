@@ -18,8 +18,11 @@ from itsdangerous.url_safe import URLSafeSerializer
 # bcrypt context is used for encryption
 bcrypt_context = CryptContext(schemes=['bcrypt'], deprecated='auto')
 
+#db dependency for db connection injection
 db_dependency = Annotated[session, Depends(get_db)]
 
+
+# User Dependenccy requirements 
 def get_user_token(x_token: Annotated[str, Header()] = None):
     return x_token
 
@@ -29,11 +32,17 @@ def get_curr_user(token:Annotated[str,Depends(get_user_token)], db:db_dependency
 
     if not request.app.state.redis.exists(token):
         return "invalid_token"
+
     user_id = request.app.state.redis.get(token).decode('UTF-8')
     # request.app.state.redis.setex(token, 1000, user_id)
     user = db.get(Users,user_id)
     return user
 
+# User dependency for gettting the current user. if invalid token the dependency returns "invalid_token" string
+user_dependency = Annotated[Users, Depends(get_curr_user)]
+
+
+# Email Dependency Requirements 
 def create_message(recipients: list[EmailStr], subject: str, body: str, ) -> MessageSchema:
     message = MessageSchema(recipients=recipients, subject=subject, body=body, subtype=MessageType.html)
     return message
@@ -57,6 +66,8 @@ mail = FastMail(config=conn)
 encoder=URLSafeSerializer(secret_key=Config.EMAIL_SECRET_KEY)
 
 
-user_dependency = Annotated[Users, Depends(get_curr_user)]
-
+# oauth2 is security framework.
+# OAuth2PasswordBearer is a security measure provided by the 
+# fastAPI framework to enbale secure authentication procedures ('flows') 
+# oauth2passwordrequestform can be used to capture the data in xform encoded url format
 form_dependency = Annotated[OAuth2PasswordRequestForm,Depends()]

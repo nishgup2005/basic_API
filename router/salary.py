@@ -1,24 +1,19 @@
-from typing import Annotated
 from fastapi import APIRouter
-from fastapi import Depends, Header
-from fastapi import Request
 from fastapi.responses import JSONResponse
-from fastapi.security import OAuth2PasswordRequestForm
-from sqlalchemy.orm import session
 from datetime import datetime
 from ..database import get_db
-from NewFast.dependencies import user_dependency, form_dependency, db_dependency
+from NewFast.dependencies import user_dependency, db_dependency
 from ..base import SalaryBase, SalaryUpdateBase
 from ..model import Salary, Users
 
-
-
-
 router = APIRouter()
 
-# POST:/salary adds the input data in the salary table for
-# a correseponding user_id
-# Salary id is generated automatically in the database
+# POST:/salary adds the input data
+# in the salary table for a 
+# correseponding user_id Salary id
+#  is generated automatically in the
+# database. Only works if the current
+# user has admin role 
 
 @router.post("/salary", status_code=400)
 async def addSalary(userSalary: SalaryBase, db: db_dependency, curr_user: user_dependency):
@@ -79,8 +74,11 @@ async def addSalary(userSalary: SalaryBase, db: db_dependency, curr_user: user_d
                                      "detail":"User is not authorized to create salary"},
                             status_code=401)
 
-# PATCH:/salary is used to update the value of input field
-# inside the Salary table
+
+# PATCH:/salary is used to 
+# update the value of input 
+# field inside the Salary table
+
 @router.patch("/salary")
 def update_salary(input:SalaryUpdateBase, db: db_dependency, curr_user: user_dependency):
     if not curr_user:

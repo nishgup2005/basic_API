@@ -26,12 +26,7 @@ hash = 'HS256'
 time_to_live = 30
 
 
-# oauth2 is security framework.
-# OAuth2PasswordBearer is a security measure provided by the 
-# fastAPI framework to enbale secure authentication procedures ('flows') 
-# oauth2_bearer = OAuth2PasswordBearer(tokenUrl='/login')
-
-
+# Base router leads to landing page
 @router.get("/")
 async def read_root():
     return {"msg":"Welcome to User Manipulation Backend"}
@@ -62,8 +57,11 @@ async def get_users(db: db_dependency):
                         status_code=200)
 
 
-# GET:/user returns the User whos session is currently logged
-# session management is performed using tokens 
+# GET:/user returns the User whos session
+# is currently logged session management 
+# is performed using tokens. Works for both
+# admin and user roles 
+
 @router.get("/user", status_code=200)
 async def get_user(curr_user: user_dependency):
     if not curr_user:
@@ -96,7 +94,10 @@ async def get_user(curr_user: user_dependency):
 
 
 
-# POST:/user is used to insert user data into the database
+# POST:/user is used to insert user data
+# into the database only works if the 
+# current user has admin access 
+
 @router.post('/user', status_code=201)
 async def create_User(user: RegisterBase, db: db_dependency, curr_user: user_dependency):
     if not curr_user:
@@ -129,7 +130,6 @@ async def create_User(user: RegisterBase, db: db_dependency, curr_user: user_dep
             return JSONResponse(content={"status_code": 422,
                                         "msg": "Unprocessable Entity",
                                         "detail":msg},
-                                
                                 status_code=422)
         
 
@@ -144,6 +144,10 @@ async def create_User(user: RegisterBase, db: db_dependency, curr_user: user_dep
                                      "detail":"User is not authorized to create user"},
                             status_code=401)
 
+
+# DELETE /user used to delete a certain user
+# only works if the current user has admin role 
+# takes user id in the requet body 
 
 @router.delete("/user", status_code=200)
 def delete_user(input: DeleteBase, db: db_dependency, curr_user: user_dependency):
@@ -183,7 +187,11 @@ def delete_user(input: DeleteBase, db: db_dependency, curr_user: user_dependency
                                      "detail":"User is not authorized to create salary"},
                             status_code=401)
 
-# /updateUser is used to update the value of input field inside the User Table
+
+# PUT /user is used to update the value of input
+# field inside the User Table only works if the 
+# current user has admin role 
+
 @router.put("/user")
 def update_user(input: UserUpdateBase, curr_user: user_dependency, db: db_dependency):
     if not curr_user:

@@ -1,13 +1,14 @@
 from fastapi import APIRouter, Request
-from NewFast.base import RegisterBase, TokenBase
+from NewFast.base import RegisterBase, TokenBase, EmailBase
 from NewFast.dependencies import db_dependency, form_dependency, bcrypt_context
 from fastapi.responses import JSONResponse
 from NewFast.model import Users
 from datetime import timedelta, datetime
-from pydantic import EmailStr
+from pydantic import EmailStr, ValidationError
 from jose import jwt
 from NewFast.setting.config import Config
 from NewFast.dependencies import mail, encoder, create_message
+from itsdangerous.exc import BadSignature
 
 
 time_to_live = Config.TIME_TO_LIVE
@@ -15,7 +16,8 @@ secret_key = Config.SECRET_KEY
 email_secret_key = Config.EMAIL_SECRET_KEY
 algorithm = Config.HASH
 
-# authenticate the user with the a valid password 
+# authenticate the user with the a valid password
+
 def authenticateUser(email: EmailStr, password:str, db:db_dependency) -> Users:
     user = (db.query(Users)
             .filter(Users.email==email)
@@ -28,7 +30,11 @@ def authenticateUser(email: EmailStr, password:str, db:db_dependency) -> Users:
     
     return user
 
-# if valid password then user token is generated 
+# Generates a JWT token that contains
+# the email, user_id for a user and
+# contains the time to live for the
+# token
+
 def create_user_token(email:str, user_id:int, ttl:timedelta) -> str:
     encode={"sub":email, "id":user_id}
     expires = datetime.now()+ttl
@@ -37,8 +43,13 @@ def create_user_token(email:str, user_id:int, ttl:timedelta) -> str:
 
 
 router = APIRouter()
+
+
+# Register is used to register new users
+# takes a user input corresponding to the Register
+# Base model , newly registered users need to be verified 
 @router.post('/register',status_code=201)
-async def user_register(user:RegisterBase, db:db_dependency):
+async def user_register(user:RegisterBase, db:db_dependency, request: Request):
     try:
         db_user = Users(name=user.name,
                             email=user.email,
@@ -57,14 +68,16 @@ async def user_register(user:RegisterBase, db:db_dependency):
         else:
             emails = [user.email]
             print(emails)
-        user_id=db_user.id
-        name = "name_here"
+        user_id = db_user.id
+        name = user.name
         encoded_url = encoder.dumps(user_id)
         html = f"""<h1> Hello {name}</h1>
                 <a href="http://127.0.0.1:8000/verify?path={encoded_url}"> Verify Email here</a>"""
 
         message = create_message(recipients=emails, subject = "Welcome User", body=html)
         await mail.send_message(message=message)
+
+        request.app.state.redis.setex(encoded_url,300,user_id)
 
         return JSONResponse(content={"status_code":200,
                                     "msg":"Email sent successfully"},
@@ -84,17 +97,13 @@ async def user_register(user:RegisterBase, db:db_dependency):
                                      "detail":msg},
                             status_code=422)
 
-    # return JSONResponse(content={"status_code":201,
-    #                              "user_id": db_user.id,
-    #                              "msg": f"user {db_user.name} "
-    #                              "has been added successfully."},
-    #                     status_code=201)
 
 
 # /login is used to log in to the user database
 # it generates a log in token which is a JWT token 
 # attaches it to the header of  the response 
 # this token is authenticated at the user portal
+
 @router.post('/login',response_model=TokenBase)
 async def token_login(form_data: form_dependency, db:db_dependency, request:Request):
 
@@ -105,6 +114,12 @@ async def token_login(form_data: form_dependency, db:db_dependency, request:Requ
                                      "detail":"invalid username/password"},
                             status_code=401)
     
+    if not user.is_active:
+        return JSONResponse(content={"status_code":"401",
+                                     "msg":"Unauthorized",
+                                     "detail":"Inactive Account, Verify with valid email"},
+                                     status_code=401)
+    
     token = create_user_token(user.email, user.id, timedelta(minutes=time_to_live))
     if request.app.state.redis.setex(token, 10000, user.id):
         print("token inserted")
@@ -114,23 +129,65 @@ async def token_login(form_data: form_dependency, db:db_dependency, request:Requ
                         status_code=200)
 
 
-@router.get('/verify')
-async def user_verify(path:str, db:db_dependency, request:Request):
-    print(email_secret_key, "This is the secret key in verify api", sep = "\n")
-    if encoder.loads(path):
-        decoded_id=encoder.loads(path)
-        user = db.get(Users, decoded_id)
-        if user is None:
-            return JSONResponse(content = {"status_code":401,
-                                            "msg":"Invalid Verification URL"},
-                                status_code=401)
-        token = create_user_token(user.email, user.id, timedelta(minutes=5))
-        if request.app.state.redis.setex(token, 300, user.id):
-            print("token inserted")
-        user.is_active = True
-        db.commit()
+@router.post('/verify')
+async def user_verify(db: db_dependency, request: Request, path: str|None = None, email: EmailBase|None = None,):
+    if path:
+        try:
+            if not request.state.app.redis.exists(path):
+                return JSONResponse(content = {"status_code":401,
+                                                "msg":"Invalid Verification URL"},
+                                    status_code=401)
+            valid_id=request.state.app.redis.get(path)
+            decoded_id=encoder.loads(path)
+            if valid_id != decoded_id:
+                return JSONResponse(content = {"status_code":401,
+                                                "msg":"Invalid Verification URL"},
+                                    status_code=401)
+            user = db.get(Users, decoded_id)
+            # if not user:
+            #     return JSONResponse(content = {"status_code":401,
+            #                                     "msg":"Invalid Verification URL"},
+            #                         status_code=401)
+            token = create_user_token(user.email, user.id, timedelta(minutes=5))
+            if request.app.state.redis.setex(token, 300, user.id):
+                print("token inserted")
+            user.is_active = True
+            db.commit()
+            return JSONResponse(content={"status_code":200,
+                                        "msg":"Login Successful",
+                                        "return to home page":""},
+                                headers={"x-token":token},
+                                status_code=200)
+        except BadSignature as e:
+                return JSONResponse(content = {"status_code":401,
+                                                "msg":"Invalid Verification URL"},
+                                    status_code=401)
+
+    elif email:
+        user  = db.query(Users).filter(Users.email == email.address).first()
+        if not user:
+                return JSONResponse(content = {"status_code":401,
+                                                "msg":"Invalid Verification email"},
+                                    status_code=401)
+        email = [email.address]
+        name = user.name
+        user_id = user.id
+        name = user.name
+        encoded_url = encoder.dumps(user_id)
+        html = f"""<h1> Hello {name}</h1>
+                <a href="http://127.0.0.1:8000/verify?path={encoded_url}"> Verify Email here</a>"""
+
+        message = create_message(recipients=email, subject = "Welcome User", body=html)
+        await mail.send_message(message=message)
+
+        request.app.state.redis.setex(encoded_url,300,user_id)
+
         return JSONResponse(content={"status_code":200,
-                                    "msg":"Login Successful",
-                                    "return to home page":""},
-                            headers={"x-token":token},
+                                     "msg":"Email sent successfully"},
                             status_code=200)
+    
+    else:
+        return JSONResponse(content={"status_code": 422,
+                                     "msg": "Unprocessable Entity",
+                                     "detail": "Missing URL / Email"},
+                            status_code=422)

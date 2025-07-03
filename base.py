@@ -34,6 +34,7 @@ class SalaryUpdateBase(BaseModel):
     field: str
     value: str | int | bool | datetime
 
+# custom class to delete a user
 class DeleteBase(BaseModel):
     user_id:int
 
@@ -99,7 +100,7 @@ class TokenBase(BaseModel):
     access_token: str
     token_type: str
 
-
+# custom class for emails 
 class EmailBase(BaseModel):
-    addresses : List[EmailStr]
+    address : EmailStr
 
