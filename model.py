@@ -13,6 +13,7 @@ class Users(Base):
     password = Column(String, nullable=False)
     phone_no = Column(String,  nullable=False)
     role = Column(String, nullable=False)
+    is_active = Column(Boolean, nullable = False, default=False)
     salary = relationship("Salary", back_populates="user", cascade="all, delete-orphan")
 
 

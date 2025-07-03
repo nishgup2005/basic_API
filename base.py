@@ -1,5 +1,6 @@
 from pydantic import BaseModel, EmailStr, field_validator, Field
 from datetime import datetime
+from typing import List
 
 #custom class to validate user information
 class UserBase(BaseModel):
@@ -8,6 +9,7 @@ class UserBase(BaseModel):
     email: EmailStr
     password: str
     phone_no: str
+    is_active: bool = False
 
 
 #custom class to validate salary information 
@@ -93,6 +95,11 @@ class RegisterBase(BaseModel):
         return value
 
 # custom class to access a token
-class Token(BaseModel):
+class TokenBase(BaseModel):
     access_token: str
     token_type: str
+
+
+class EmailBase(BaseModel):
+    addresses : List[EmailStr]
+

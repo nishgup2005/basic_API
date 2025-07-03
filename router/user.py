@@ -5,53 +5,26 @@ from sqlalchemy.orm import session
 from fastapi.responses import JSONResponse
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from ..model import Users
-from ..base import RegisterBase, UserUpdateBase, DeleteBase, Token
+from ..base import RegisterBase, UserUpdateBase, DeleteBase, TokenBase
 from jose import jwt
 from datetime import datetime, timedelta
 from pydantic import EmailStr
 from passlib.context import CryptContext
-from secrets import token_hex
+from NewFast.setting.config import Config
+from ..dependencies import user_dependency, form_dependency, db_dependency, bcrypt_context
 
 router = APIRouter()
-
-db_dependency = Annotated[session, Depends(get_db)]
-
-async def get_user_token(x_token: Annotated[str, Header()] = None):
-    return x_token
-
-async def get_curr_user(token:Annotated[str,Depends(get_user_token)], db:db_dependency, request:Request):
-    if not token:
-        return JSONResponse(content={"status_code":401,
-                                     "msg":"Unauthorized",
-                                     "detail":"Invalid Token"},
-                            status_code=401)
-
-    if not request.app.state.redis.exists(token):
-        return JSONResponse(content={"status_code":401,
-                                     "msg":"Unauthorized",
-                                     "detail":"Invalid Token"},
-                            status_code=401)
-    user_id = request.app.state.redis.get(token).decode('UTF-8')
-    # request.app.state.redis.setex(token, 1000, user_id)
-    user = db.get(Users,user_id)
-    return user
-
-user_dependency = Annotated[Users, Depends(get_curr_user)]
-
-form_dependency = Annotated[OAuth2PasswordRequestForm,Depends()]
 
 # secret key is used hash the data
 # the token hex function from secrets module takes an input n 
 # and returns random 32 byte string which can be used as a secret key
 
-secret_key = token_hex(32)
+secret_key = Config.SECRET_KEY
 hash = 'HS256'
 
 # time_to_live is the time defined after which a token will expire
 time_to_live = 30
 
-# bcrypt context is used for encryption
-bcrypt_context = CryptContext(schemes=['bcrypt'], deprecated='auto')
 
 # oauth2 is security framework.
 # OAuth2PasswordBearer is a security measure provided by the 
@@ -93,11 +66,16 @@ async def get_users(db: db_dependency):
 # session management is performed using tokens 
 @router.get("/user", status_code=200)
 async def get_user(curr_user: user_dependency):
-
     if not curr_user:
         return JSONResponse(content={"status_code": 404,
                                      "msg": "User Not Found"},
                             status_code=404)
+    
+    if curr_user=="invalid_token":
+        return JSONResponse(content={"status_code":401,
+                                     "msg":"Unauthorized",
+                                     "detail":"Invalid Token"},
+                            status_code=401)        
 
     if curr_user.salary:
         salary = curr_user.salary[0].salary
@@ -117,82 +95,20 @@ async def get_user(curr_user: user_dependency):
                             status_code=200)
 
 
-@router.post('/register',status_code=201)
-async def user_register(user:RegisterBase, db:db_dependency):
-    try:
-        db_user = Users(name=user.name,
-                            email=user.email,
-                            password=bcrypt_context.hash(user.password),
-                            phone_no=user.phone_no,
-                            role="user")
-
-        db.add(db_user)
-        db.commit()
-        db.refresh(db_user)
-
-
-    except Exception as e:
-        msg=str(e.orig).split(':')[-1].replace('\n', '').strip()
-        return JSONResponse(content={"status_code": 422,
-                                     "msg": "Unprocessable Entity",
-                                     "detail":msg},
-                            status_code=422)
-
-    return JSONResponse(content={"status_code":201,
-                                 "user_id": db_user.id,
-                                 "msg": f"user {db_user.name} "
-                                 "has been added successfully."},
-                        status_code=201)
-
-
-# /login is used to log in to the user database
-# it generates a log in token which is a JWT token 
-# attaches it to the header of  the response 
-# this token is authenticated at the user portal
-@router.post('/login',response_model=Token)
-async def token_login(form_data: form_dependency, db:db_dependency, request:Request):
-
-    user = authenticateUser(form_data.username, form_data.password, db)
-    if not user:
-        return JSONResponse(content={"status_code":401,
-                                     "msg":"Unauthorized",
-                                     "detail":"invalid username/password"},
-                            status_code=401)
-    
-    token = create_user_token(user.email, user.id, timedelta(minutes=time_to_live))
-    if request.app.state.redis.setex(token, 10000, user.id):
-        print("token inserted")
-    return JSONResponse(content={"status_code":200,
-                                 "msg":"Login Successful"},
-                        headers={"x-token":token},
-                        status_code=200)
-
-
-# authenticate the user with the a valid password 
-def authenticateUser(email: EmailStr, password:str, db:db_dependency) -> Users:
-    user = (db.query(Users)
-            .filter(Users.email==email)
-            .first())
-    if not user:
-        return False
-
-    if not bcrypt_context.verify(password, user.password):
-        return False
-    
-    return user
-
-# if valid password then user token is generated 
-def create_user_token(email:str, user_id:int, ttl:timedelta) -> str:
-    encode={"sub":email, "id":user_id}
-    expires = datetime.now()+ttl
-    encode.update({"exp":expires})
-    return jwt.encode(encode, secret_key, algorithm=hash)
-
 
 # POST:/user is used to insert user data into the database
 @router.post('/user', status_code=201)
 async def create_User(user: RegisterBase, db: db_dependency, curr_user: user_dependency):
-
+    if not curr_user:
+        return JSONResponse(content={"status_code": 404,
+                                     "msg": "User Not Found"},
+                            status_code=404)
+    
+    if curr_user=="invalid_token":
+        return JSONResponse(content={"status_code":401,
+                                     "msg":"Unauthorized",
+                                     "detail":"Invalid Token"},
+                            status_code=401)         
     # checks if the current user has admin access
     if curr_user.role=="admin":
         try:
@@ -200,7 +116,8 @@ async def create_User(user: RegisterBase, db: db_dependency, curr_user: user_dep
                                   email=user.email,
                                   password=bcrypt_context.hash(user.password),
                                   phone_no=user.phone_no,
-                                  role="user")
+                                  role="user",
+                                  is_active=False)
 
             db.add(db_user)
             db.commit()
@@ -219,7 +136,7 @@ async def create_User(user: RegisterBase, db: db_dependency, curr_user: user_dep
         return JSONResponse(content={"status_code":201,
                                     "user_id": db_user.id,
                                     "msg": f"user {db_user.name} "
-                                    "has been added successfully."},
+                                    "has been added successfully. Verify Email to activate User"},
                             status_code=201)
     else:
         return JSONResponse(content={"status_code":401,
@@ -230,7 +147,16 @@ async def create_User(user: RegisterBase, db: db_dependency, curr_user: user_dep
 
 @router.delete("/user", status_code=200)
 def delete_user(input: DeleteBase, db: db_dependency, curr_user: user_dependency):
-
+    if not curr_user:
+        return JSONResponse(content={"status_code": 404,
+                                     "msg": "User Not Found"},
+                            status_code=404)
+    
+    if curr_user=="invalid_token":
+        return JSONResponse(content={"status_code":401,
+                                     "msg":"Unauthorized",
+                                     "detail":"Invalid Token"},
+                            status_code=401)     
     # checks if the current user has admin access
     if curr_user.role=="admin":
         user = db.get(Users, input.user_id)
@@ -260,11 +186,16 @@ def delete_user(input: DeleteBase, db: db_dependency, curr_user: user_dependency
 # /updateUser is used to update the value of input field inside the User Table
 @router.put("/user")
 def update_user(input: UserUpdateBase, curr_user: user_dependency, db: db_dependency):
-
     if not curr_user:
         return JSONResponse(content={"status_code": 404,
                                      "msg": "User Not Found"},
                             status_code=404)
+    
+    if curr_user=="invalid_token":
+        return JSONResponse(content={"status_code":401,
+                                     "msg":"Unauthorized",
+                                     "detail":"Invalid Token"},
+                            status_code=401)
 
     field = input.field.lower()
     value = input.value

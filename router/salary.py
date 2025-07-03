@@ -7,6 +7,7 @@ from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import session
 from datetime import datetime
 from ..database import get_db
+from NewFast.dependencies import user_dependency, form_dependency, db_dependency
 from ..base import SalaryBase, SalaryUpdateBase
 from ..model import Salary, Users
 
@@ -15,39 +16,22 @@ from ..model import Salary, Users
 
 router = APIRouter()
 
-db_dependency = Annotated[session, Depends(get_db)]
-
-async def get_user_token(x_token: Annotated[str, Header()] = None):
-    return x_token
-
-async def get_curr_user(token:Annotated[str,Depends(get_user_token)], db:db_dependency, request:Request):
-    if not token:
-        return JSONResponse(content={"status_code":401,
-                                     "msg":"Unauthorized",
-                                     "detail":"Invalid Token"},
-                            status_code=401)
-
-    if not request.app.state.redis.exists(token):
-        return JSONResponse(content={"status_code":401,
-                                     "msg":"Unauthorized",
-                                     "detail":"Invalid Token"},
-                            status_code=401)
-    user_id = request.app.state.redis.get(token).decode('UTF-8')
-    # request.app.state.redis.setex(token, 1000, user_id)
-    user = db.get(Users,user_id)
-    return user
-
-user_dependency = Annotated[Users, Depends(get_curr_user)]
-
-form_dependency = Annotated[OAuth2PasswordRequestForm,Depends()]
-
 # POST:/salary adds the input data in the salary table for
 # a correseponding user_id
 # Salary id is generated automatically in the database
 
 @router.post("/salary", status_code=400)
 async def addSalary(userSalary: SalaryBase, db: db_dependency, curr_user: user_dependency):
-
+    if not curr_user:
+        return JSONResponse(content={"status_code": 404,
+                                     "msg": "User Not Found"},
+                            status_code=404)
+    
+    if curr_user=="invalid_token":
+        return JSONResponse(content={"status_code":401,
+                                     "msg":"Unauthorized",
+                                     "detail":"Invalid Token"},
+                            status_code=401)     
     # checks if the current user has admin access
     if curr_user.role=="admin":
 
@@ -99,6 +83,16 @@ async def addSalary(userSalary: SalaryBase, db: db_dependency, curr_user: user_d
 # inside the Salary table
 @router.patch("/salary")
 def update_salary(input:SalaryUpdateBase, db: db_dependency, curr_user: user_dependency):
+    if not curr_user:
+        return JSONResponse(content={"status_code": 404,
+                                     "msg": "User Not Found"},
+                            status_code=404)
+    
+    if curr_user=="invalid_token":
+        return JSONResponse(content={"status_code":401,
+                                     "msg":"Unauthorized",
+                                     "detail":"Invalid Token"},
+                            status_code=401)
     
     # checks if the current user has admin access
     if curr_user.role=="admin":
