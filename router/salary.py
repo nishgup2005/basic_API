@@ -1,10 +1,9 @@
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from datetime import datetime
-from ..database import get_db
 from NewFast.dependencies import user_dependency, db_dependency
-from ..base import SalaryBase, SalaryUpdateBase
-from ..model import Salary, Users
+from NewFast.base import SalaryBase, SalaryUpdateBase
+from NewFast.model import Salary, Users
 
 router = APIRouter()
 

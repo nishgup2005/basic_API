@@ -1,8 +1,9 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from NewFast.setting.config import Config
 
-SQLALCHEMY_DATABASE_URL = 'postgresql://postgres:1234@localhost:5432'
-db = 'company'
+# URL used to link the provide the route to the database
+SQLALCHEMY_DATABASE_URL = Config.SQLALCHEMY_DATABASE_URL
 engine = create_engine(SQLALCHEMY_DATABASE_URL)
 session = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 

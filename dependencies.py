@@ -2,31 +2,28 @@ from typing import Annotated
 from sqlalchemy.orm import session
 from .database import get_db
 from fastapi import Depends, Header, Request
-from fastapi.responses import JSONResponse
-from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
-from fastapi_mail import FastMail, MessageSchema, MessageType, ConnectionConfig
-from .model import Users, Salary
+from fastapi.security import OAuth2PasswordRequestForm
+from fastapi_mail import FastMail, ConnectionConfig
+from .model import Users
 from passlib.context import CryptContext
 from NewFast.setting.config import Config
 from pathlib import Path
-from pydantic import EmailStr
-from datetime import datetime, timedelta
-from jose import jwt
 from itsdangerous.url_safe import URLSafeSerializer
 
 
 # bcrypt context is used for encryption
 bcrypt_context = CryptContext(schemes=['bcrypt'], deprecated='auto')
 
-#db dependency for db connection injection
+# db dependency for db connection injection
 db_dependency = Annotated[session, Depends(get_db)]
 
 
-# User Dependenccy requirements 
+# User Dependenccy requirements
 def get_user_token(x_token: Annotated[str, Header()] = None):
     return x_token
 
-def get_curr_user(token:Annotated[str,Depends(get_user_token)], db:db_dependency, request:Request):
+
+def get_curr_user(token: Annotated[str, Depends(get_user_token)], db: db_dependency, request: Request):
     if not token:
         return "invalid_token"
 
@@ -35,39 +32,35 @@ def get_curr_user(token:Annotated[str,Depends(get_user_token)], db:db_dependency
 
     user_id = request.app.state.redis.get(token).decode('UTF-8')
     # request.app.state.redis.setex(token, 1000, user_id)
-    user = db.get(Users,user_id)
+    user = db.get(Users, user_id)
     return user
+
 
 # User dependency for gettting the current user. if invalid token the dependency returns "invalid_token" string
 user_dependency = Annotated[Users, Depends(get_curr_user)]
 
 
-# Email Dependency Requirements 
-def create_message(recipients: list[EmailStr], subject: str, body: str, ) -> MessageSchema:
-    message = MessageSchema(recipients=recipients, subject=subject, body=body, subtype=MessageType.html)
-    return message
-
 BASE_DIR = Path(__file__).resolve().parent
 
-conn = ConnectionConfig(MAIL_USERNAME = Config.MAIL_USERNAME,
-                        MAIL_PASSWORD = Config.MAIL_PASSWORD,
-                        MAIL_FROM = Config.MAIL_FROM,
-                        MAIL_PORT = Config.MAIL_PORT,
-                        MAIL_SERVER = Config.MAIL_SERVER,
+conn = ConnectionConfig(MAIL_USERNAME=Config.MAIL_USERNAME,
+                        MAIL_PASSWORD=Config.MAIL_PASSWORD,
+                        MAIL_FROM=Config.MAIL_FROM,
+                        MAIL_PORT=Config.MAIL_PORT,
+                        MAIL_SERVER=Config.MAIL_SERVER,
                         MAIL_FROM_NAME=Config.MAIL_FROM_NAME,
-                        MAIL_STARTTLS = Config.MAIL_STARTTLS,
-                        MAIL_SSL_TLS = Config.MAIL_SSL_TLS,
-                        USE_CREDENTIALS = Config.USE_CREDENTIALS,
-                        VALIDATE_CERTS = Config.VALIDATE_CERTS,
-                        TEMPLATE_FOLDER = Path(BASE_DIR, "templates"))
+                        MAIL_STARTTLS=Config.MAIL_STARTTLS,
+                        MAIL_SSL_TLS=Config.MAIL_SSL_TLS,
+                        USE_CREDENTIALS=Config.USE_CREDENTIALS,
+                        VALIDATE_CERTS=Config.VALIDATE_CERTS,
+                        TEMPLATE_FOLDER=Path(BASE_DIR, "templates"))
 
 mail = FastMail(config=conn)
 
-encoder=URLSafeSerializer(secret_key=Config.EMAIL_SECRET_KEY)
+encoder = URLSafeSerializer(secret_key=Config.EMAIL_SECRET_KEY)
 
 
 # oauth2 is security framework.
-# OAuth2PasswordBearer is a security measure provided by the 
-# fastAPI framework to enbale secure authentication procedures ('flows') 
+# OAuth2PasswordBearer is a security measure provided by the
+# fastAPI framework to enbale secure authentication procedures ('flows')
 # oauth2passwordrequestform can be used to capture the data in xform encoded url format
-form_dependency = Annotated[OAuth2PasswordRequestForm,Depends()]
+form_dependency = Annotated[OAuth2PasswordRequestForm, Depends()]

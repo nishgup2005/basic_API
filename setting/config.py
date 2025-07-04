@@ -1,6 +1,7 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings (BaseSettings):
+    SQLALCHEMY_DATABASE_URL :str 
     SECRET_KEY: str
     HASH : str
     TIME_TO_LIVE : int = 30
