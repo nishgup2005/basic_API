@@ -9,6 +9,7 @@ from passlib.context import CryptContext
 from NewFast.setting.config import Config
 from pathlib import Path
 from itsdangerous.url_safe import URLSafeSerializer
+from fastapi.templating import Jinja2Templates
 
 
 # bcrypt context is used for encryption
@@ -64,3 +65,6 @@ encoder = URLSafeSerializer(secret_key=Config.EMAIL_SECRET_KEY)
 # fastAPI framework to enbale secure authentication procedures ('flows')
 # oauth2passwordrequestform can be used to capture the data in xform encoded url format
 form_dependency = Annotated[OAuth2PasswordRequestForm, Depends()]
+
+# Jinja2Template is used for creating HTML templates for ease of use
+template = Jinja2Templates(directory=Config.TEMPLATE_FOLDER)

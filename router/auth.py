@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Request, Form
 from NewFast.base import RegisterBase, TokenBase, EmailBase, ResetPassBase
-from NewFast.dependencies import db_dependency, form_dependency, bcrypt_context
-from fastapi.responses import JSONResponse, HTMLResponse
+from NewFast.dependencies import db_dependency, form_dependency, bcrypt_context, template
+from fastapi.responses import JSONResponse
 from NewFast.model import Users
 from datetime import timedelta, datetime
 from pydantic import EmailStr
@@ -79,7 +79,7 @@ async def user_register(user: RegisterBase, db: db_dependency, request: Request)
         verify_mail(email=emails, user_id=user_id, name=name, request=request)
 
         return JSONResponse(content={"status_code": 200,
-                                     "msg": "Email sent successfully"},
+                                     "msg": "Please Check your Email for Account Verification"},
                             status_code=200)
 
     except AttributeError as e:
@@ -126,24 +126,24 @@ async def token_login(form_data: form_dependency, db: db_dependency, request: Re
                         headers={"x-token": token},
                         status_code=200)
 
+
 # GET/ verify is used to accept incoming verification
 # from the email that has been sent.
 # Once recieved it changes the is_Active variable to True
 # for the user whose email it has been sent to.
 
+@router.get('/verify/{encoded_url}')
+async def user_verify(db: db_dependency, request: Request, encoded_url: str):
 
-@router.get('/verify')
-async def user_verify_path(db: db_dependency, request: Request, path: str):
-
-    if not request.app.state.redis.exists(path):
+    if not request.app.state.redis.exists(encoded_url):
         return JSONResponse(content={"status_code": 401,
                                      "msg": "Unauthorized",
                                      "detail": "Invalid Verification URL"},
                             status_code=401)
-    valid_id = int(request.app.state.redis.get(path).decode("utf-8"))
+    valid_id = int(request.app.state.redis.get(encoded_url).decode("utf-8"))
 
     try:
-        decoded_id = encoder.loads(path)
+        decoded_id = encoder.loads(encoded_url)
     except BadSignature as e:
         return JSONResponse(content={"status_code": 401,
                                      "msg": "Unauthorized",
@@ -172,11 +172,11 @@ async def user_verify_path(db: db_dependency, request: Request, path: str):
                         headers={"x-token": token},
                         status_code=200)
 
+
 # POST /verify is used to verify users who
 # were not verified at the time of creation
 # Simply entering the email in the body of
 # the request will trigger the verification process
-
 
 @router.post('/verify')
 async def user_verify_email(db: db_dependency, request: Request, email: EmailBase):
@@ -189,12 +189,16 @@ async def user_verify_email(db: db_dependency, request: Request, email: EmailBas
     name = user.name
     user_id = user.id
     name = user.name
-    verify_mail(email=emails, name=name, user_id=user_id, request=request)
+    await verify_mail(email=emails, name=name, user_id=user_id, request=request)
+    return JSONResponse(content={"status_code": 200,
+                                 "msg": "Email Sent Successfully",
+                                 "detail":"Please Check Your Email to Verify Your Account"},
+                        status_code=200)
+
 
 # PATCH /password is used to reset a user Password
 # it takes the email and sends a reset password link
 # to that email
-
 
 @router.patch("/password")
 async def reset_password(email: EmailBase, db: db_dependency, request: Request):
@@ -210,12 +214,13 @@ async def reset_password(email: EmailBase, db: db_dependency, request: Request):
     await reset_pass_mail(email=emails, user_id=user_id, name=name, request=request)
 
     return JSONResponse(content={"status_code": 200,
-                                 "msg": "Email sent successfully"},
+                                 "msg": "Email Sent Successfully",
+                                 "detail":"Please Check Your Email to Reset Your Password"},
                         status_code=200)
+
 
 # GET /password is use to display the reset password
 # form for the user who have reached here from their emails
-
 
 @router.get("/password/{encoded_url}")
 async def new_password(encoded_url: str, request: Request):
@@ -224,30 +229,13 @@ async def new_password(encoded_url: str, request: Request):
                                      "msg": "Unauthorized",
                                      "detail": "Session Expired"},
                             status_code=401)
-    html_content = f"""
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Document</title>
-</head>
-<body>
-    <form action="http://127.0.0.1:8000/password/{encoded_url}" method="post">
-        <label for="new_pass">Old Password</label>
-        <input type="text" name="new_pass" id="new_pass" placeholder="enter your new password here">
-        <label for="confirm_new_pass">New Password</label>
-        <input type="text" name="confirm_new_pass" id="confim_new_pass" placeholder="confirm your new password here">
-        <input type="submit" value="submit">
-    </form>
-</body>
-</html>"""
-    return HTMLResponse(content=html_content)
+
+    return template.TemplateResponse(request=request, name="reset_password.html",context={"encoded_url":encoded_url})
+
 
 # POST /password can be reached through the form in GET /password request
 # This API is where the password is changed
 # Once verified the password is hashed and changed
-
 
 @router.post("/password/{encoded_url}", response_model=None)
 async def set_password(encoded_url: str, db: db_dependency, reset_pass: Annotated[ResetPassBase, Form()], request: Request):

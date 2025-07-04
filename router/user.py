@@ -19,36 +19,54 @@ time_to_live = 30
 
 
 # Base router leads to landing page
+
 @router.get("/")
 async def read_root():
     return {"msg": "Welcome to User Manipulation Backend"}
 
+
 # /users returns all the users in the database
 
-
 @router.get("/users")
-async def get_users(db: db_dependency):
-    all_users = (
-        db.query(Users).all()
-    )
-
-    if not all_users:
+async def get_users(db: db_dependency, curr_user: user_dependency):
+    if not curr_user:
         return JSONResponse(content={"status_code": 404,
-                                     "msg": "No Users Found"},
-
+                                     "msg": "User Not Found"},
                             status_code=404)
 
-    users = [{"user_id": i.id,
-              "name": i.name,
-             "salary": (i.salary[0].salary
-                        if i.salary
-                        else None)}
-             for i in all_users]
+    if curr_user == "invalid_token":
+        return JSONResponse(content={"status_code": 401,
+                                     "msg": "Unauthorized",
+                                     "detail": "Invalid Token"},
+                            status_code=401)
+    # checks if the current user has admin access
+    if curr_user.role == "admin":
+        all_users = (
+            db.query(Users).all()
+        )
 
-    return JSONResponse(content={"status_code": 200,
-                                 "users": users,
-                                 "msg": f"found {len(users)} user(s)"},
-                        status_code=200)
+        if not all_users:
+            return JSONResponse(content={"status_code": 404,
+                                         "msg": "No Users Found"},
+
+                                status_code=404)
+
+        users = [{"user_id": i.id,
+                  "name": i.name,
+                  "salary": (i.salary[0].salary
+                             if i.salary
+                             else None)}
+                 for i in all_users]
+
+        return JSONResponse(content={"status_code": 200,
+                                     "users": users,
+                                     "msg": f"found {len(users)} user(s)"},
+                            status_code=200)
+    else:
+        return JSONResponse(content={"status_code": 401,
+                                     "msg": "Unauthorized",
+                                     "detail": "User is not authorized to view all users"},
+                            status_code=401)
 
 
 # GET:/user returns the User whos session
@@ -247,13 +265,13 @@ def update_user(input: UserUpdateBase, curr_user: user_dependency, db: db_depend
                                      "detail": "Field for User does not exist"},
                             status_code=422)
 
+
 # PATCH /password is used to change the password
 #  for a particular user it is separated from the
 # ordinary update user API because password needs
 # additional security measures
 
-
-@router.patch('/password')
+@router.patch('/userpassword')
 async def change_password(input: ChangePasswordBase, curr_user: user_dependency, db: db_dependency):
 
     if not curr_user:
