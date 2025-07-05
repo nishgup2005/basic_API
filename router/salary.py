@@ -5,7 +5,7 @@ from NewFast.dependencies import user_dependency, db_dependency
 from NewFast.base import SalaryBase, SalaryUpdateBase
 from NewFast.model import Salary, Users
 
-router = APIRouter()
+router = APIRouter(tags=["salary"])
 
 # POST:/salary adds the input data
 # in the salary table for a 

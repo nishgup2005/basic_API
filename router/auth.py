@@ -49,7 +49,7 @@ def create_user_token(email: str, user_id: int, ttl: timedelta) -> str:
     return jwt.encode(encode, secret_key, algorithm=algorithm)
 
 
-router = APIRouter()
+router = APIRouter(tags=["auth"])
 
 
 # Register is used to register new users
