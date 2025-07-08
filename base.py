@@ -1,6 +1,5 @@
 from pydantic import BaseModel, EmailStr, field_validator, Field
 from datetime import datetime
-from typing import List
 
 # custom class to validate user information
 
