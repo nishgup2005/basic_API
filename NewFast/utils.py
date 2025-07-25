@@ -1,6 +1,6 @@
 from fastapi import Request
 from pydantic import EmailStr
-from NewFast.dependencies import encoder, mail, template
+from NewFast.NewFast.dependencies import encoder, mail, template
 from fastapi_mail import MessageSchema, MessageType
 from typing import Dict, Any
 

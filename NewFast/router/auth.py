@@ -1,14 +1,14 @@
 from fastapi import APIRouter, Request, Form
-from NewFast.base import RegisterBase, TokenBase, EmailBase, ResetPassBase
-from NewFast.dependencies import db_dependency, form_dependency, bcrypt_context, template
+from NewFast.NewFast.base import RegisterBase, TokenBase, EmailBase, ResetPassBase
+from NewFast.NewFast.dependencies import db_dependency, form_dependency, bcrypt_context, template
 from fastapi.responses import JSONResponse
-from NewFast.model import Users
+from NewFast.NewFast.model import Users
 from datetime import timedelta, datetime
 from pydantic import EmailStr
 from jose import jwt
-from NewFast.setting.config import Config
-from NewFast.dependencies import encoder
-from NewFast.utils import verify_mail, reset_pass_mail
+from NewFast.NewFast.setting.config import Config
+from NewFast.NewFast.dependencies import encoder
+from NewFast.NewFast.utils import verify_mail, reset_pass_mail
 from itsdangerous.exc import BadSignature
 from typing import Annotated
 

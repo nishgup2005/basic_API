@@ -1,6 +1,6 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from NewFast.setting.config import Config
+from NewFast.NewFast.setting.config import Config
 
 # URL used to link the provide the route to the database
 SQLALCHEMY_DATABASE_URL = Config.SQLALCHEMY_DATABASE_URL

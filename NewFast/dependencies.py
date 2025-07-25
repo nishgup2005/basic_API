@@ -1,12 +1,12 @@
 from typing import Annotated
 from sqlalchemy.orm import session
-from .database import get_db
+from NewFast.NewFast.database import get_db
 from fastapi import Depends, Header, Request
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi_mail import FastMail, ConnectionConfig
-from .model import Users
+from NewFast.NewFast.model import Users
 from passlib.context import CryptContext
-from NewFast.setting.config import Config
+from NewFast.NewFast.setting.config import Config
 from pathlib import Path
 from itsdangerous.url_safe import URLSafeSerializer
 from fastapi.templating import Jinja2Templates

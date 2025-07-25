@@ -1,8 +1,8 @@
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
-from ..model import Users
-from ..base import RegisterBase, UserUpdateBase, DeleteBase, ChangePasswordBase
-from NewFast.setting.config import Config
+from NewFast.NewFast.model import Users
+from NewFast.NewFast.base import RegisterBase, UserUpdateBase, DeleteBase, ChangePasswordBase
+from NewFast.NewFast.setting.config import Config
 from ..dependencies import user_dependency, db_dependency, bcrypt_context
 import time
 import asyncio
@@ -26,29 +26,6 @@ time_to_live = 30
 async def read_root():
     return {"msg": "Welcome to User Manipulation Backend"}
 
-
-def testingfunc(entity:str):
-    dict1={"":""}
-    for i in range(10):
-        a=input(f"enter your name here {entity}")
-        dict1[i] = a
-    print(dict1)
-
-async def testingfunc2(entity:str):
-    sum = 0
-    for i in range(10):
-        sum=sum+i
-        print(sum)
-        await asyncio.sleep(1)
-    print(sum)
-
-@router.get('/test')
-def testingfun(entity:str):
-    testingfunc(entity)
-
-@router.get('/test2')
-async def testingf(entity:str):
-    await testingfunc2(entity)
 
 # /users returns all the users in the database
 
